@@ -1112,22 +1112,35 @@ if (!session) {
       }}
     >
       <form
-        onSubmit={async (e) => {
-          e.preventDefault();
+ onSubmit={async (e) => {
+  e.preventDefault();
 
-          const { error } = await signIn(
-            loginEmail,
-            loginPassword
-          );
+  setLoginError("");
 
-          if (error) {
-            setLoginError(error.message);
-            return;
-          }
+const { data, error } = await signInAdmin(
+  loginEmail,
+  loginPassword
+);
 
-          const { data } = await getCurrentSession();
-          setSession(data.session);
-        }}
+if (error) {
+  setLoginError(error.message);
+  return;
+}
+
+if (data?.session) {
+  setSession(data.session);
+  return;
+}
+
+const sessionResult = await getCurrentSession();
+
+if (sessionResult.data?.session) {
+  setSession(sessionResult.data.session);
+  return;
+}
+
+setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verifica que el usuario esté confirmado en Authentication.");
+}}
         style={{
           width: 420,
           padding: 30,
