@@ -1191,6 +1191,18 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
     <section className="hero-section"><div><p className="eyebrow">Programador académico local</p><h1>Programador {data.settings.institutionName || "PreICFES"}</h1><p className="subtitle">Versión local configurable con respaldo, grupos dinámicos, docentes, materias, reglas de disponibilidad, pagos, informes, vista mensual y vista semanal.</p></div><article className="institution-logo-card">{data.settings.logoDataUrl ? <img src={data.settings.logoDataUrl} alt="Logo de la institución" /> : <span>Logo institución</span>}</article></section>
     {message && <div className="app-message">{message}</div>}
     <nav className="top-tabs">{[{id:"calendario",label:"Calendario"},{id:"semanal",label:"Semanal"},{id:"configuracion",label:"Configuración"},{id:"disponibilidad",label:"Disponibilidad"},{id:"pagos",label:"Pagos"},{id:"dashboard",label:"Horas"},{id:"informes",label:"Informes"},{id:"respaldo",label:"Respaldo"}].map((tab)=><button key={tab.id} className={activeSection===tab.id?"active":""} onClick={()=>setActiveSection(tab.id)}>{tab.label}</button>)}</nav>
+    <div style={{ marginTop: "10px" }}>
+  <button
+    type="button"
+    className="ghost-button"
+    onClick={async () => {
+      await signOutAdmin();
+      setSession(null);
+    }}
+  >
+    Cerrar sesión
+  </button>
+</div>
 
     {(activeSection === "calendario" || activeSection === "semanal") && <><section className="filters-card"><label>Filtro docente<select value={filters.teacher} onChange={(e)=>setFilters({...filters,teacher:e.target.value})}><option value="">Todos</option>{activeTeachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Filtro materia<select value={filters.subject} onChange={(e)=>setFilters({...filters,subject:e.target.value})}><option value="">Todas</option>{activeSubjects.map((s)=><option key={s.id}>{s.name}</option>)}</select></label><label>Color principal<select value={data.settings.colorBy} onChange={(e)=>updateSettings("colorBy",e.target.value)}><option value="subject">Materia</option><option value="group">Grupo</option><option value="teacher">Docente</option></select></label><button onClick={()=>setFilters({teacher:"",subject:""})}>Limpiar filtros</button></section><section className="group-tabs">{activeGroups.map((g)=><button key={g.id} className={g.name===selectedGroup?"active":""} style={{borderColor:g.color}} onClick={()=>setSelectedGroup(g.name)}>{g.name}<span>{g.type==="free"?"Horas libres":g.type==="custom"?"Personalizado":"Franjas fijas"}{g.travelBlock?" · desplazamiento":""}</span></button>)}<button type="button" className="audit-tab-button" onClick={auditSchedules}>Auditar<span>Validar conflictos</span></button><button type="button" className="audit-tab-button clean-audit" onClick={cleanInvalidSchedules}>Limpiar inválidos<span>{invalidSchedules.length} detectado(s)</span></button></section></>}
 
