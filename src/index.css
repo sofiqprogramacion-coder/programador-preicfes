@@ -52,7 +52,8 @@ h2 { margin-bottom: 10px; }
 .summary-card strong { font-size: 3rem; line-height: 1; color: #60a5fa; }
 .summary-card span { color: #cbd5e1; }
 
-.top-tabs { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+.top-tabs { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+.main-tabs { display: flex; flex: 1 1 auto; gap: 10px; flex-wrap: wrap; min-width: 0; }
 .top-tabs button, .group-tabs button, .filters-card button, .ghost-button, .close-button {
   cursor: pointer;
   border-radius: 999px;
@@ -72,7 +73,7 @@ h2 { margin-bottom: 10px; }
   width: 100%; border: 1px solid rgba(148, 163, 184, 0.28); border-radius: 14px; padding: 11px 12px; color: #e5e7eb; background: rgba(2, 6, 23, 0.72); outline: none;
 }
 
-.group-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+.group-tabs { display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; margin-bottom: 16px; }
 .group-tabs button { display: grid; gap: 2px; text-align: left; min-width: 150px; }
 .group-tabs span { font-size: 0.74rem; color: #bfdbfe; font-weight: 700; }
 
@@ -962,9 +963,13 @@ select option:checked { background-color: #2563eb !important; color: #fff !impor
 select option:disabled { background-color: #0b1220 !important; color: #64748b !important; }
 
 .audit-tab-button {
+  flex: 0 0 auto;
   border-color: rgba(52, 211, 153, .45) !important;
   background: linear-gradient(135deg, rgba(6, 78, 59, .72), rgba(20, 83, 45, .42)) !important;
   color: #d1fae5 !important;
+}
+.audit-tab-button:not(.clean-audit) {
+  margin-left: auto;
 }
 .audit-tab-button:hover {
   border-color: rgba(110, 231, 183, .72) !important;
@@ -972,4 +977,29 @@ select option:disabled { background-color: #0b1220 !important; color: #64748b !i
 }
 .audit-tab-button span {
   color: #a7f3d0 !important;
+}
+
+.logout-button {
+  flex: 0 0 auto;
+  margin-left: auto;
+  border-color: rgba(251, 113, 133, .36) !important;
+  background: linear-gradient(135deg, rgba(127, 29, 29, .62), rgba(251, 113, 133, .18)) !important;
+  color: #ffe4e6 !important;
+  box-shadow: 0 12px 26px rgba(127, 29, 29, .18);
+}
+.logout-button:hover {
+  border-color: rgba(253, 164, 175, .62) !important;
+  background: linear-gradient(135deg, rgba(153, 27, 27, .78), rgba(251, 113, 133, .28)) !important;
+  color: #fff1f2 !important;
+}
+
+@media (max-width: 760px) {
+  .main-tabs,
+  .logout-button {
+    width: 100%;
+  }
+  .logout-button,
+  .audit-tab-button:not(.clean-audit) {
+    margin-left: 0;
+  }
 }
