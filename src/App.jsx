@@ -1187,8 +1187,10 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
     </div>
   );
 }
+ const headerUserEmail = session?.user?.email || "admin@sofiq.com";
+ const headerSyncLabel = cloudReady ? new Date().toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : "Sincronizado";
  return <main className="app-shell dark-theme">
-    <section className="hero-section"><div><p className="eyebrow">Programador académico local</p><h1>Programador {data.settings.institutionName || "PreICFES"}</h1><p className="subtitle">Versión local configurable con respaldo, grupos dinámicos, docentes, materias, reglas de disponibilidad, pagos, informes, vista mensual y vista semanal.</p></div><article className="institution-logo-card">{data.settings.logoDataUrl ? <img src={data.settings.logoDataUrl} alt="Logo de la institución" /> : <span>Logo institución</span>}</article></section>
+    <section className="hero-section"><div className="hero-copy"><p className="eyebrow">Programador académico local</p><h1>Programador PreICFES Sarasty</h1><p className="subtitle">Versión local configurable con respaldo, grupos dinámicos, docentes, materias, reglas de disponibilidad, pagos, informes, vista mensual y vista semanal.</p></div><div className="hero-side"><article className="session-status-card"><div><span>Usuario</span><strong>{headerUserEmail}</strong></div><div><span>Estado</span><strong>En línea</strong></div><div><span>Última sincronización</span><strong>{headerSyncLabel}</strong></div></article><article className="institution-logo-card">{data.settings.logoDataUrl ? <img src={data.settings.logoDataUrl} alt="Logo de la institución" /> : <span>Logo institución</span>}</article></div></section>
     {message && <div className="app-message">{message}</div>}
     <nav className="top-tabs"><div className="main-tabs">{[{id:"calendario",label:"Calendario"},{id:"semanal",label:"Semanal"},{id:"configuracion",label:"Configuración"},{id:"disponibilidad",label:"Disponibilidad"},{id:"pagos",label:"Pagos"},{id:"dashboard",label:"Horas"},{id:"informes",label:"Informes"},{id:"respaldo",label:"Respaldo"}].map((tab)=><button key={tab.id} className={activeSection===tab.id?"active":""} onClick={()=>setActiveSection(tab.id)}>{tab.label}</button>)}</div><button
       type="button"

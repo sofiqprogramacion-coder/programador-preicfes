@@ -1003,3 +1003,135 @@ select option:disabled { background-color: #0b1220 !important; color: #64748b !i
     margin-left: 0;
   }
 }
+
+/* V29 - Encabezado empresarial y barras superiores compactas. */
+.hero-section {
+  align-items: center;
+  padding: 18px 20px;
+  border: 1px solid rgba(148, 163, 184, .18);
+  border-radius: 26px;
+  background: linear-gradient(135deg, rgba(15, 23, 42, .84), rgba(30, 41, 59, .62));
+  box-shadow: 0 20px 70px rgba(2, 6, 23, .24);
+}
+.hero-copy {
+  min-width: 0;
+}
+.hero-copy h1 {
+  margin-bottom: 8px;
+  font-size: clamp(2rem, 3.4vw, 3.35rem);
+}
+.hero-copy .subtitle {
+  margin-bottom: 0;
+}
+.hero-side {
+  display: flex;
+  align-items: stretch;
+  justify-content: flex-end;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.session-status-card {
+  width: min(360px, 32vw);
+  padding: 12px 14px;
+  display: grid;
+  gap: 9px;
+  border: 1px solid rgba(148, 163, 184, .20);
+  border-radius: 20px;
+  background: rgba(2, 6, 23, .34);
+}
+.session-status-card div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+.session-status-card span {
+  color: #94a3b8;
+  font-size: .72rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+.session-status-card strong {
+  min-width: 0;
+  color: #e0f2fe;
+  font-size: .88rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.institution-logo-card {
+  min-width: 130px;
+  max-width: 170px;
+  min-height: 74px;
+  padding: 10px 12px;
+  border-radius: 20px;
+}
+.institution-logo-card img {
+  max-width: 132px;
+  max-height: 50px;
+}
+
+@media (min-width: 1180px) {
+  .top-tabs {
+    flex-wrap: nowrap;
+  }
+  .main-tabs {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .top-tabs button {
+    min-height: 38px;
+    padding: 9px 13px;
+    white-space: nowrap;
+  }
+  .group-tabs {
+    flex-wrap: nowrap;
+    gap: 7px;
+  }
+  .group-tabs button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 10px;
+    line-height: 1.08;
+  }
+  .group-tabs button span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .audit-tab-button {
+    flex: .82 1 0;
+  }
+  .audit-tab-button:not(.clean-audit) {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 1179px) {
+  .hero-section {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .hero-side {
+    justify-content: stretch;
+  }
+  .session-status-card {
+    width: auto;
+    flex: 1 1 auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .hero-section {
+    padding: 16px;
+    border-radius: 22px;
+  }
+  .hero-side {
+    flex-direction: column;
+  }
+  .session-status-card div {
+    grid-template-columns: 1fr;
+    gap: 3px;
+  }
+}
