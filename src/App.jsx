@@ -3,6 +3,7 @@ import Calendar from "./components/Calendar";
 import { colombiaHolidays2026 } from "./data/holidays";
 import { formatDateKey, formatLongDate } from "./utils/calendarUtils";
 import { loadCloudState, saveCloudState } from "./utils/cloudStorage";
+import { getCurrentSession, signInAdmin, signOutAdmin } from "./lib/supabase";
 
 const APP_DATA_KEY = "programador-academico-local-v8";
 const LEGACY_KEYS = [
@@ -296,6 +297,11 @@ function loadInitialData() {
 export default function App() {
   const [data, setData] = useState(loadInitialData);
   const [cloudReady, setCloudReady] = useState(false);
+  const [session, setSession] = useState(null);
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [authReady, setAuthReady] = useState(false);
   const [activeSection, setActiveSection] = useState("calendario");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedGroup, setSelectedGroup] = useState(data.groups.find((g) => g.active)?.name || "Intensivo");
@@ -314,6 +320,15 @@ export default function App() {
   const [autoDraft, setAutoDraft] = useState({ month: monthInputValue(new Date()), groups: [], subjects: [], teacherMap: {}, targetHours: {}, priorityMap: {} });
   const [autoResult, setAutoResult] = useState(null);
   const [matrixFilters, setMatrixFilters] = useState({});
+  useEffect(() => {
+  async function checkSession() {
+    const { data } = await getCurrentSession();
+    setSession(data.session || null);
+    setAuthReady(true);
+  }
+
+  checkSession();
+}, []);
 
   useEffect(() => {
   async function initCloud() {
@@ -1081,7 +1096,85 @@ useEffect(() => {
     return <section className="management-card"><div className="section-title"><p className="eyebrow">Vista semanal</p><h2>{group.name} · Semana del {formatDateKey(weekStart)}</h2><p className="muted">Vista operativa complementaria. La vista mensual se conserva como principal.</p></div><div className="week-controls"><button className="ghost-button" onClick={() => setWeekStart(addDays(weekStart, -7))}>← Semana anterior</button><button className="primary-button" onClick={() => setWeekStart(getMonday(new Date()))}>Semana actual</button><button className="ghost-button" onClick={() => setWeekStart(addDays(weekStart, 7))}>Semana siguiente →</button></div><div className="weekly-table"><div className="weekly-head">Hora</div>{days.map((d)=><div className="weekly-head" key={formatDateKey(d)}>{d.toLocaleDateString("es-CO", { weekday:"short", day:"2-digit", month:"2-digit" })}</div>)}{slots.map((slot)=><><div className="weekly-hour" key={`h-${slot.startTime}`}>{slot.label}</div>{days.map((d)=>{ const key=formatDateKey(d); const daily=validSchedules.filter((s)=>s.group===group.name&&s.date===key&&overlap(slot.startTime,slot.endTime,s.startTime,s.endTime)); return <div className="weekly-cell" key={`${key}-${slot.startTime}`} onDragOver={(e)=>e.preventDefault()} onDrop={(e)=>moveSchedule(e.dataTransfer.getData("text/plain"), key, slot)}>{daily.length?daily.map((s)=><div draggable onDragStart={(e)=>e.dataTransfer.setData("text/plain",s.id)} className="weekly-class" style={{"--item-color": colorForSchedule(s)}} key={s.id}>{s.subject}<small>{s.teacher} · {s.startTime}-{s.endTime}{s.classroom?` · ${s.classroom}`:""}</small></div>):<span>Libre</span>}</div>})}</>)} </div></section>;
   }
 
-  return <main className="app-shell dark-theme">
+ if (!authReady) {
+  return <div style={{ padding: 40 }}>Cargando...</div>;
+}
+
+if (!session) {
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        background: "#0f172a",
+      }}
+    >
+      <form
+        onSubmit={async (e) => {
+          e.preventDefault();
+
+          const { error } = await signIn(
+            loginEmail,
+            loginPassword
+          );
+
+          if (error) {
+            setLoginError(error.message);
+            return;
+          }
+
+          const { data } = await getCurrentSession();
+          setSession(data.session);
+        }}
+        style={{
+          width: 420,
+          padding: 30,
+          borderRadius: 12,
+          background: "#111827",
+          color: "white",
+        }}
+      >
+        <h2>Programador PreICFES</h2>
+
+        <input
+          type="email"
+          placeholder="Correo"
+          value={loginEmail}
+          onChange={(e) => setLoginEmail(e.target.value)}
+          style={{ width: "100%", padding: 10, marginBottom: 10 }}
+        />
+
+        <input
+          type="password"
+          placeholder="Contraseña"
+          value={loginPassword}
+          onChange={(e) => setLoginPassword(e.target.value)}
+          style={{ width: "100%", padding: 10, marginBottom: 10 }}
+        />
+
+        {loginError && (
+          <p style={{ color: "red" }}>
+            {loginError}
+          </p>
+        )}
+
+        <button
+          type="submit"
+          style={{
+            width: "100%",
+            padding: 12,
+            cursor: "pointer",
+          }}
+        >
+          Ingresar
+        </button>
+      </form>
+    </div>
+  );
+}
+ return <main className="app-shell dark-theme">
     <section className="hero-section"><div><p className="eyebrow">Programador académico local</p><h1>Programador {data.settings.institutionName || "PreICFES"}</h1><p className="subtitle">Versión local configurable con respaldo, grupos dinámicos, docentes, materias, reglas de disponibilidad, pagos, informes, vista mensual y vista semanal.</p></div><article className="institution-logo-card">{data.settings.logoDataUrl ? <img src={data.settings.logoDataUrl} alt="Logo de la institución" /> : <span>Logo institución</span>}</article></section>
     {message && <div className="app-message">{message}</div>}
     <nav className="top-tabs">{[{id:"calendario",label:"Calendario"},{id:"semanal",label:"Semanal"},{id:"configuracion",label:"Configuración"},{id:"disponibilidad",label:"Disponibilidad"},{id:"pagos",label:"Pagos"},{id:"dashboard",label:"Horas"},{id:"informes",label:"Informes"},{id:"respaldo",label:"Respaldo"}].map((tab)=><button key={tab.id} className={activeSection===tab.id?"active":""} onClick={()=>setActiveSection(tab.id)}>{tab.label}</button>)}</nav>
