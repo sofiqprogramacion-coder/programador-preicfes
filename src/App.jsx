@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import Calendar from "./components/Calendar";
 import { colombiaHolidays2026 } from "./data/holidays";
 import { formatDateKey, formatLongDate } from "./utils/calendarUtils";
+import { loadCloudState, saveCloudState } from "./utils/cloudStorage";
 
 const APP_DATA_KEY = "programador-academico-local-v8";
 const LEGACY_KEYS = [
@@ -294,6 +295,7 @@ function loadInitialData() {
 
 export default function App() {
   const [data, setData] = useState(loadInitialData);
+  const [cloudReady, setCloudReady] = useState(false);
   const [activeSection, setActiveSection] = useState("calendario");
   const [currentDate, setCurrentDate] = useState(new Date());
   const [selectedGroup, setSelectedGroup] = useState(data.groups.find((g) => g.active)?.name || "Intensivo");
@@ -313,7 +315,48 @@ export default function App() {
   const [autoResult, setAutoResult] = useState(null);
   const [matrixFilters, setMatrixFilters] = useState({});
 
-  useEffect(() => { localStorage.setItem(APP_DATA_KEY, JSON.stringify(data)); }, [data]);
+  useEffect(() => {
+  async function initCloud() {
+    try {
+      const cloudData = await loadCloudState();
+
+      if (cloudData && cloudData.version && cloudData.groups && cloudData.teachers && cloudData.subjects) {
+        setData(
+          sanitizeAppData({
+            ...cloudData,
+            version: 28,
+            subjects: normalizeSubjects(cloudData.subjects || defaultSubjects),
+            extraHours: cloudData.extraHours || [],
+            settings: {
+              holidayMode: "warn",
+              colorBy: "subject",
+              institutionName: "PreICFES Sarasty",
+              logoDataUrl: "",
+              ...(cloudData.settings || {}),
+            },
+          })
+        );
+      }
+
+      setCloudReady(true);
+    } catch (error) {
+      console.error("Error cargando datos desde Supabase:", error);
+      setCloudReady(true);
+    }
+  }
+
+  initCloud();
+}, []);
+
+useEffect(() => {
+  if (!cloudReady) return;
+
+  localStorage.setItem(APP_DATA_KEY, JSON.stringify(data));
+
+  saveCloudState(data).catch((error) => {
+    console.error("Error guardando datos en Supabase:", error);
+  });
+}, [data, cloudReady]);
 
   const groups = data.groups;
   const subjects = data.subjects;
