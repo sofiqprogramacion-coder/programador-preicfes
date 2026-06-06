@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import ExcelJS from "exceljs";
 import Calendar from "./components/Calendar";
 import { colombiaHolidays2026 } from "./data/holidays";
-import { formatDateKey, formatLongDate } from "./utils/calendarUtils";
+import { formatDateKey, formatLongDate, isDateInRange } from "./utils/calendarUtils";
 import { loadCloudState, saveCloudState } from "./utils/cloudStorage";
 import { getCurrentSession, signInAdmin, signOutAdmin } from "./lib/supabase";
 
@@ -78,15 +79,31 @@ function dayLabel(value) { return weekDayOptions.find((d) => Number(d.value) ===
 function monthInputValue(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; }
 function monthFromInput(value) { const [year, month] = String(value).split("-").map(Number); return new Date(year || new Date().getFullYear(), (month || 1) - 1, 1); }
 function monthLabel(date) { return date.toLocaleDateString("es-CO", { month: "long", year: "numeric" }); }
-function monthSuffix(date) { return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`; }
-function filterSchedulesForReport(schedules, monthDate, filters = {}) {
-  return schedules.filter((s) => sameMonth(s.date, monthDate)
+function currentMonthRange(date = new Date()) {
+  return {
+    startDate: formatDateKey(new Date(date.getFullYear(), date.getMonth(), 1)),
+    endDate: formatDateKey(new Date(date.getFullYear(), date.getMonth() + 1, 0)),
+  };
+}
+function isValidDateRange(range) { return Boolean(range?.startDate && range?.endDate && range.startDate <= range.endDate); }
+function rangePeriodLabel(range) {
+  if (!isValidDateRange(range)) return "Rango inválido";
+  return `${range.startDate} al ${range.endDate}`;
+}
+function rangeSuffix(range) {
+  if (!isValidDateRange(range)) return "rango-invalido";
+  return `${range.startDate}-a-${range.endDate}`;
+}
+function filterSchedulesForRange(schedules, range, filters = {}) {
+  if (!isValidDateRange(range)) return [];
+  return schedules.filter((s) => isDateInRange(s.date, range.startDate, range.endDate)
     && (!filters.group || s.group === filters.group)
     && (!filters.teacher || s.teacher === filters.teacher)
     && (!filters.subject || s.subject === filters.subject));
 }
-function filterExtraHoursForReport(extraHours, monthDate, filters = {}) {
-  return extraHours.filter((x) => sameMonth(x.date, monthDate)
+function filterExtraHoursForRange(extraHours, range, filters = {}) {
+  if (!isValidDateRange(range)) return [];
+  return extraHours.filter((x) => isDateInRange(x.date, range.startDate, range.endDate)
     && (!filters.teacher || x.teacher === filters.teacher)
     && !filters.group
     && !filters.subject);
@@ -313,11 +330,13 @@ export default function App() {
   const [restrictionDraft, setRestrictionDraft] = useState({ teacher: data.teachers[0]?.name || "", day: 1, startTime: "08:00", endTime: "10:00" });
   const [extraDraft, setExtraDraft] = useState({ teacher: data.teachers[0]?.name || "", date: formatDateKey(new Date()), hours: 1, rate: 0, concept: "Horas extras" });
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
-  const [paymentsDate, setPaymentsDate] = useState(new Date());
-  const [dashboardDate, setDashboardDate] = useState(new Date());
+  const defaultRange = currentMonthRange();
+  const [paymentsRange, setPaymentsRange] = useState(defaultRange);
+  const [dashboardRange, setDashboardRange] = useState(defaultRange);
   const [reportDate, setReportDate] = useState(new Date());
+  const [reportRange, setReportRange] = useState(defaultRange);
   const [reportFilters, setReportFilters] = useState({ group: "", teacher: "", subject: "" });
-  const [autoDraft, setAutoDraft] = useState({ month: monthInputValue(new Date()), groups: [], subjects: [], teacherMap: {}, targetHours: {}, priorityMap: {} });
+  const [autoDraft, setAutoDraft] = useState({ ...defaultRange, groups: [], subjects: [], teacherMap: {}, targetHours: {}, priorityMap: {} });
   const [autoResult, setAutoResult] = useState(null);
   const [matrixFilters, setMatrixFilters] = useState({});
   useEffect(() => {
@@ -398,14 +417,22 @@ useEffect(() => {
   const selectedSchedules = selectedDateKey ? validSchedules.filter((s) => s.date === selectedDateKey && s.group === selectedGroup).sort((a, b) => a.startTime.localeCompare(b.startTime)) : [];
   const monthlyExtraHours = useMemo(() => (data.extraHours || []).filter((x) => sameMonth(x.date, currentDate)), [data.extraHours, currentDate]);
   const counters = useMemo(() => buildCounters(monthlySchedules, groups, teachers, subjects, monthlyExtraHours), [monthlySchedules, groups, teachers, subjects, monthlyExtraHours]);
-  const paymentsSchedules = useMemo(() => validSchedules.filter((s) => sameMonth(s.date, paymentsDate)), [validSchedules, paymentsDate]);
-  const paymentsExtraHours = useMemo(() => (data.extraHours || []).filter((x) => sameMonth(x.date, paymentsDate)), [data.extraHours, paymentsDate]);
+  const paymentsRangeValid = isValidDateRange(paymentsRange);
+  const dashboardRangeValid = isValidDateRange(dashboardRange);
+  const reportRangeValid = isValidDateRange(reportRange);
+  const autoRangeValid = isValidDateRange(autoDraft);
+  const paymentsSchedules = useMemo(() => filterSchedulesForRange(validSchedules, paymentsRange), [validSchedules, paymentsRange]);
+  const paymentsExtraHours = useMemo(() => filterExtraHoursForRange(data.extraHours || [], paymentsRange), [data.extraHours, paymentsRange]);
   const paymentsCounters = useMemo(() => buildCounters(paymentsSchedules, groups, teachers, subjects, paymentsExtraHours), [paymentsSchedules, groups, teachers, subjects, paymentsExtraHours]);
-  const dashboardSchedules = useMemo(() => validSchedules.filter((s) => sameMonth(s.date, dashboardDate)), [validSchedules, dashboardDate]);
-  const dashboardExtraHours = useMemo(() => (data.extraHours || []).filter((x) => sameMonth(x.date, dashboardDate)), [data.extraHours, dashboardDate]);
+  const dashboardSchedules = useMemo(() => filterSchedulesForRange(validSchedules, dashboardRange), [validSchedules, dashboardRange]);
+  const dashboardExtraHours = useMemo(() => filterExtraHoursForRange(data.extraHours || [], dashboardRange), [data.extraHours, dashboardRange]);
   const dashboardCounters = useMemo(() => buildCounters(dashboardSchedules, groups, teachers, subjects, dashboardExtraHours), [dashboardSchedules, groups, teachers, subjects, dashboardExtraHours]);
-  const reportSchedules = useMemo(() => filterSchedulesForReport(validSchedules, reportDate, reportFilters), [validSchedules, reportDate, reportFilters]);
-  const reportExtraHours = useMemo(() => filterExtraHoursForReport(data.extraHours || [], reportDate, reportFilters), [data.extraHours, reportDate, reportFilters]);
+  const reportSchedules = useMemo(() => filterSchedulesForRange(validSchedules, reportRange, reportFilters), [validSchedules, reportRange, reportFilters]);
+  const reportExtraHours = useMemo(() => filterExtraHoursForRange(data.extraHours || [], reportRange, reportFilters), [data.extraHours, reportRange, reportFilters]);
+  const reportCalendarSchedules = useMemo(() => validSchedules.filter((s) => sameMonth(s.date, reportDate)
+    && (!reportFilters.group || s.group === reportFilters.group)
+    && (!reportFilters.teacher || s.teacher === reportFilters.teacher)
+    && (!reportFilters.subject || s.subject === reportFilters.subject)), [validSchedules, reportDate, reportFilters]);
   const reportCounters = useMemo(() => buildCounters(reportSchedules, groups, teachers, subjects, reportExtraHours), [reportSchedules, groups, teachers, subjects, reportExtraHours]);
 
   function show(text) { setMessage(text); clearTimeout(show.timer); show.timer = setTimeout(() => setMessage(""), 6500); }
@@ -739,8 +766,8 @@ useEffect(() => {
     return parts.length ? parts.join(" · ") : "Informe completo";
   }
 
-  function exportRowsCsv(rows, filename) {
-    exportFile(filename, rows.map((r) => r.map(csv).join(";")).join("\n"), "text/csv;charset=utf-8");
+  function updateRange(setter, field, value) {
+    setter((old) => ({ ...old, [field]: value }));
   }
 
   function hoursDetailRows(list = reportSchedules) {
@@ -759,6 +786,98 @@ useEffect(() => {
         isSimulationSubject(s.subject) ? 0 : Number(s.hours || hoursBetween(s.startTime, s.endTime)),
       ]));
     return rows;
+  }
+
+  function sortedSchedulesForExcel(list = reportSchedules) {
+    return list
+      .slice()
+      .sort((a, b) => `${a.date} ${a.group} ${scheduleTimeLabel(a)} ${a.teacher} ${a.subject}`.localeCompare(`${b.date} ${b.group} ${scheduleTimeLabel(b)} ${b.teacher} ${b.subject}`));
+  }
+
+  function reportMetaRows(title) {
+    const generatedAt = new Date().toLocaleString("es-CO", { dateStyle: "medium", timeStyle: "short" });
+    return [
+      [data.settings.institutionName || "PreICFES Sarasty"],
+      [title],
+      [`Periodo analizado: ${rangePeriodLabel(reportRange)}`],
+      [`Filtros aplicados: ${reportFilterLabel()}`],
+      [`Fecha y hora de generación: ${generatedAt}`],
+      ["Desarrollado por SOFTWARE INTELLIGENCE QUALITY - Ing. Juan Camilo Pérez"],
+    ];
+  }
+
+  function styleExcelWorksheet(worksheet, headerRowNumber, moneyColumns = [], hourColumns = [], totalRowNumbers = []) {
+    worksheet.views = [{ state: "frozen", ySplit: headerRowNumber }];
+    const headerRow = worksheet.getRow(headerRowNumber);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4F8F" } };
+      cell.alignment = { vertical: "middle", horizontal: "center" };
+      cell.border = excelBorder();
+    });
+    worksheet.eachRow((row, rowNumber) => {
+      row.eachCell((cell, colNumber) => {
+        cell.border = excelBorder();
+        cell.alignment = { vertical: "middle", horizontal: colNumber === 1 ? "center" : "left" };
+        if (moneyColumns.includes(colNumber)) {
+          cell.numFmt = '"COP" #,##0';
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        }
+        if (hourColumns.includes(colNumber)) {
+          cell.numFmt = '0.## "h"';
+          cell.alignment = { vertical: "middle", horizontal: "right" };
+        }
+      });
+      if (rowNumber <= 6) {
+        row.font = { bold: rowNumber <= 2 };
+        row.eachCell((cell) => { cell.border = {}; });
+      }
+      if (totalRowNumbers.includes(rowNumber)) {
+        row.font = { bold: true };
+        row.eachCell((cell) => {
+          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0ECFF" } };
+        });
+      }
+    });
+    worksheet.autoFilter = {
+      from: { row: headerRowNumber, column: 1 },
+      to: { row: Math.max(headerRowNumber, worksheet.rowCount), column: worksheet.columnCount },
+    };
+    autoFitWorksheet(worksheet);
+  }
+
+  function excelBorder() {
+    return {
+      top: { style: "thin", color: { argb: "FFCBD5E1" } },
+      left: { style: "thin", color: { argb: "FFCBD5E1" } },
+      bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+      right: { style: "thin", color: { argb: "FFCBD5E1" } },
+    };
+  }
+
+  function autoFitWorksheet(worksheet) {
+    worksheet.columns.forEach((column) => {
+      let maxLength = 10;
+      column.eachCell({ includeEmpty: true }, (cell) => {
+        const value = cell.value;
+        const text = value === null || value === undefined ? "" : String(value);
+        maxLength = Math.max(maxLength, Math.min(text.length + 2, 42));
+      });
+      column.width = maxLength;
+    });
+  }
+
+  async function downloadWorkbook(workbook, filename) {
+    const buffer = await workbook.xlsx.writeBuffer();
+    exportFile(filename, buffer, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  }
+
+  function addMetaRows(worksheet, title, columnCount) {
+    reportMetaRows(title).forEach((row) => worksheet.addRow(row));
+    for (let rowNumber = 1; rowNumber <= 6; rowNumber += 1) {
+      worksheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
+    }
+    worksheet.addRow([]);
   }
 
   function paymentDetailRows(list = reportSchedules, extras = reportExtraHours) {
@@ -783,37 +902,125 @@ useEffect(() => {
     return rows;
   }
 
-  function generateHoursCSV() {
+  async function generateHoursExcel() {
+    if (!reportRangeValid) return show("Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.");
     if (!reportSchedules.length) return show("No hay información para exportar en el periodo seleccionado.");
-    exportRowsCsv(hoursDetailRows(), `horas-detalladas-${monthSuffix(reportDate)}.csv`);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "SOFTWARE INTELLIGENCE QUALITY";
+    workbook.created = new Date();
+
+    const detail = workbook.addWorksheet("Detalle de horas");
+    addMetaRows(detail, "Informe detallado de horas", 8);
+    detail.addRow(["Fecha", "Grupo", "Subgrupo", "Horario", "Materia", "Docente", "Tipo", "Horas"]);
+    sortedSchedulesForExcel().forEach((s) => detail.addRow([
+      s.date,
+      s.group,
+      s.classroom || "",
+      scheduleTimeLabel(s),
+      s.subject,
+      s.teacher,
+      isSimulationSubject(s.subject) ? "Simulacro" : "Clase",
+      isSimulationSubject(s.subject) ? 0 : Number(s.hours || hoursBetween(s.startTime, s.endTime)),
+    ]));
+    const simulations = reportSchedules.filter((s) => isSimulationSubject(s.subject)).length;
+    const totalRow = detail.addRow(["TOTAL GENERAL", "", "", "", "", "", `Simulacros: ${simulations}`, reportCounters.totalHours]);
+    styleExcelWorksheet(detail, 8, [], [8], [totalRow.number]);
+
+    const summary = workbook.addWorksheet("Resumen");
+    addMetaRows(summary, "Resumen de horas", 5);
+    summary.addRow(["Docente", "Horas clase", "Simulacros", "Pago estimado", "Total pagos"]);
+    teachers.forEach((t) => summary.addRow([t.name, reportCounters.byTeacher[t.name] || 0, reportCounters.simulationsByTeacher[t.name] || 0, reportCounters.payByTeacher[t.name] || 0, reportCounters.totalPayByTeacher[t.name] || 0]));
+    const teacherTotal = summary.addRow(["TOTAL GENERAL", reportCounters.totalHours, simulations, Object.values(reportCounters.payByTeacher).reduce((a, b) => a + Number(b || 0), 0), reportCounters.totalPay]);
+    summary.addRow([]);
+    const subjectHeader = summary.addRow(["Materia", "Horas / cantidad", "", "", ""]);
+    subjects.forEach((s) => summary.addRow([s.name, reportCounters.bySubject[s.name] || 0, "", "", ""]));
+    styleExcelWorksheet(summary, 8, [4, 5], [2], [teacherTotal.number]);
+    subjectHeader.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4F8F" } };
+      cell.border = excelBorder();
+    });
+
+    await downloadWorkbook(workbook, `horas-detalladas-${rangeSuffix(reportRange)}.xlsx`);
+    show("Informe de horas exportado en Excel.");
   }
 
-  function generatePaymentsCSV() {
+  async function generatePaymentsExcel() {
+    if (!reportRangeValid) return show("Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.");
     if (!reportSchedules.length && !reportExtraHours.length) return show("No hay información de pagos para exportar en el periodo seleccionado.");
-    exportRowsCsv(paymentDetailRows(), `pagos-detallados-${monthSuffix(reportDate)}.csv`);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "SOFTWARE INTELLIGENCE QUALITY";
+    workbook.created = new Date();
+
+    const detail = workbook.addWorksheet("Detalle de pagos");
+    addMetaRows(detail, "Informe detallado de pagos", 10);
+    detail.addRow(["Fecha", "Grupo", "Subgrupo", "Horario", "Materia/Concepto", "Docente", "Tipo", "Horas", "Valor unitario", "Total"]);
+    sortedSchedulesForExcel().forEach((s) => {
+      const simulation = isSimulationSubject(s.subject);
+      const hours = simulation ? 0 : Number(s.hours || hoursBetween(s.startTime, s.endTime));
+      const unitValue = simulation ? Number(s.simulationRate || teacherByName(teachers, s.teacher)?.simulationRate || 0) : Number(s.hourlyRate || teacherByName(teachers, s.teacher)?.hourlyRate || 0);
+      detail.addRow([s.date, s.group, s.classroom || "", scheduleTimeLabel(s), s.subject, s.teacher, simulation ? "Simulacro" : "Clase", hours, unitValue, simulation ? unitValue : hours * unitValue]);
+    });
+    reportExtraHours
+      .slice()
+      .sort((a, b) => `${a.date} ${a.teacher} ${a.concept || ""}`.localeCompare(`${b.date} ${b.teacher} ${b.concept || ""}`))
+      .forEach((x) => detail.addRow([x.date, "", "", "", x.concept || "Horas extras", x.teacher, "Hora extra", Number(x.hours || 0), Number(x.rate || 0), Number(x.hours || 0) * Number(x.rate || 0)]));
+    const simulations = Object.values(reportCounters.simulationsByTeacher).reduce((a, b) => a + Number(b || 0), 0);
+    const totalRow = detail.addRow(["TOTAL GENERAL", "", "", "", "", "", `Simulacros: ${simulations}`, reportCounters.totalHours + reportCounters.totalExtraHours, "", reportCounters.totalPay]);
+    styleExcelWorksheet(detail, 8, [9, 10], [8], [totalRow.number]);
+
+    const summary = workbook.addWorksheet("Resumen por docente");
+    addMetaRows(summary, "Resumen de pagos por docente", 8);
+    summary.addRow(["Docente", "Horas clase", "Simulacros", "Horas extra", "Pago clases", "Pago simulacros", "Pago extras", "Total"]);
+    teachers.forEach((t) => summary.addRow([
+      t.name,
+      reportCounters.byTeacher[t.name] || 0,
+      reportCounters.simulationsByTeacher[t.name] || 0,
+      reportCounters.extraHoursByTeacher[t.name] || 0,
+      reportCounters.payByTeacher[t.name] || 0,
+      reportCounters.simPayByTeacher[t.name] || 0,
+      reportCounters.extraPayByTeacher[t.name] || 0,
+      reportCounters.totalPayByTeacher[t.name] || 0,
+    ]));
+    const summaryTotal = summary.addRow([
+      "TOTAL GENERAL",
+      reportCounters.totalHours,
+      simulations,
+      reportCounters.totalExtraHours,
+      Object.values(reportCounters.payByTeacher).reduce((a, b) => a + Number(b || 0), 0),
+      Object.values(reportCounters.simPayByTeacher).reduce((a, b) => a + Number(b || 0), 0),
+      reportCounters.totalExtraPay,
+      reportCounters.totalPay,
+    ]);
+    styleExcelWorksheet(summary, 8, [5, 6, 7, 8], [2, 4], [summaryTotal.number]);
+
+    await downloadWorkbook(workbook, `pagos-detallados-${rangeSuffix(reportRange)}.xlsx`);
+    show("Informe de pagos exportado en Excel.");
   }
 
   function buildPrintableTable(title, rows) {
     const header = rows[0] || [];
     const body = rows.slice(1).filter((r) => r.length);
     const htmlRows = body.map((r) => `<tr>${header.map((_, i) => `<td>${escapeHtml(r[i] ?? "")}</td>`).join("")}</tr>`).join("");
-    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial;margin:24px;color:#111827}.toolbar{margin-bottom:14px}h1{margin-bottom:4px}.meta{color:#475569;margin-bottom:20px}table{width:100%;border-collapse:collapse}th{background:#1f4f8f;color:white}td,th{border:1px solid #cbd5e1;padding:7px;font-size:11px;text-align:left}tfoot td{font-weight:bold}@media print{.toolbar{display:none}body{margin:12mm}}</style></head><body><div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div><h1>${escapeHtml(title)}</h1><p class="meta">Periodo: ${escapeHtml(monthLabel(reportDate))} · ${escapeHtml(reportFilterLabel())}</p><table><thead><tr>${header.map((h)=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${htmlRows}</tbody></table><p class="meta">Desarrollado por SOFTWARE INTELLIGENCE QUALITY - Ing. Juan Camilo Pérez</p></body></html>`;
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title><style>body{font-family:Arial;margin:24px;color:#111827}.toolbar{margin-bottom:14px}h1{margin-bottom:4px}.meta{color:#475569;margin-bottom:20px}table{width:100%;border-collapse:collapse}th{background:#1f4f8f;color:white}td,th{border:1px solid #cbd5e1;padding:7px;font-size:11px;text-align:left}tfoot td{font-weight:bold}@media print{.toolbar{display:none}body{margin:12mm}}</style></head><body><div class="toolbar"><button onclick="window.print()">Guardar como PDF</button></div><h1>${escapeHtml(title)}</h1><p class="meta">Periodo analizado: ${escapeHtml(rangePeriodLabel(reportRange))} · ${escapeHtml(reportFilterLabel())}</p><table><thead><tr>${header.map((h)=>`<th>${escapeHtml(h)}</th>`).join("")}</tr></thead><tbody>${htmlRows}</tbody></table><p class="meta">Desarrollado por SOFTWARE INTELLIGENCE QUALITY - Ing. Juan Camilo Pérez</p></body></html>`;
   }
 
   function printHoursReport() {
+    if (!reportRangeValid) return show("Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.");
     if (!reportSchedules.length) return show("No hay información de horas para generar el informe.");
     const win = window.open("", "_blank"); if (!win) return show("El navegador bloqueó la ventana emergente.");
     win.document.write(buildPrintableTable("Informe detallado de horas", hoursDetailRows())); win.document.close();
   }
 
   function printPaymentsReport() {
+    if (!reportRangeValid) return show("Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.");
     if (!reportSchedules.length && !reportExtraHours.length) return show("No hay información de pagos para generar el informe.");
     const win = window.open("", "_blank"); if (!win) return show("El navegador bloqueó la ventana emergente.");
     win.document.write(buildPrintableTable("Informe detallado de pagos", paymentDetailRows())); win.document.close();
   }
 
   function printableCalendarReport() {
-    if (!reportSchedules.length) return show("No hay programación para generar el calendario en PDF.");
+    if (!reportCalendarSchedules.length) return show("No hay programación para generar el calendario en PDF.");
     const year = reportDate.getFullYear(); const month = reportDate.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const first = new Date(year, month, 1).getDay();
@@ -822,7 +1029,7 @@ useEffect(() => {
     for (let i = 0; i < firstMondayIndex; i++) cells.push(null);
     for (let d = 1; d <= daysInMonth; d++) cells.push(d);
     const weekdayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
-    const byDate = reportSchedules.reduce((acc, item) => { acc[item.date] ??= []; acc[item.date].push(item); return acc; }, {});
+    const byDate = reportCalendarSchedules.reduce((acc, item) => { acc[item.date] ??= []; acc[item.date].push(item); return acc; }, {});
     const cellHtml = cells.map((day) => {
       if (!day) return `<div class="day empty"></div>`;
       const dateKey = formatDateKey(new Date(year, month, day));
@@ -835,7 +1042,7 @@ useEffect(() => {
   }
 
 
-  function matrixHoursBySubject(monthDate) {
+  function matrixHoursBySubject() {
     const rows = subjects.filter((s) => s.active !== false).map((subject) => {
       const values = {};
       activeGroups.forEach((groupItem) => { values[groupItem.name] = 0; });
@@ -850,7 +1057,7 @@ useEffect(() => {
     return rows;
   }
 
-  function matrixHoursByTeacher(monthDate) {
+  function matrixHoursByTeacher() {
     const rows = teachers.filter((t) => t.active !== false).map((teacher) => {
       const values = {};
       activeGroups.forEach((groupItem) => { values[groupItem.name] = 0; });
@@ -865,7 +1072,7 @@ useEffect(() => {
     return rows;
   }
 
-  function matrixPaymentsByTeacher(monthDate) {
+  function matrixPaymentsByTeacher() {
     const rows = teachers.filter((t) => t.active !== false).map((teacher) => {
       const values = {};
       activeGroups.forEach((groupItem) => { values[groupItem.name] = 0; });
@@ -911,6 +1118,14 @@ useEffect(() => {
   function renderMatrixTable(title, firstColumn, rows, valueFormatter = (v) => `${v || 0} h`, includeExtras = false, tableId = title) {
     const visibleRows = rows.filter((row) => matrixRowVisible(row, tableId, includeExtras));
     const tableFilters = matrixFilters[tableId] || {};
+    const totalsRow = {
+      values: activeGroups.reduce((acc, groupItem) => {
+        acc[groupItem.name] = visibleRows.reduce((sum, row) => sum + Number(row.values[groupItem.name] || 0), 0);
+        return acc;
+      }, {}),
+      extras: visibleRows.reduce((sum, row) => sum + Number(row.extras || 0), 0),
+      total: visibleRows.reduce((sum, row) => sum + Number(row.total || 0), 0),
+    };
     const statusFilter = (field) => (
       <select
         className="column-filter"
@@ -951,6 +1166,12 @@ useEffect(() => {
                   <td className={Number(row.total || 0) > 0 ? "cell-total cell-positive" : "cell-total cell-zero"}><strong>{valueFormatter(row.total || 0)}</strong></td>
                 </tr>
               )) : <tr><td colSpan={activeGroups.length + (includeExtras ? 3 : 2)}>Sin resultados con los filtros seleccionados.</td></tr>}
+              <tr className="matrix-total-row">
+                <td className="sticky-col"><strong>TOTAL GENERAL</strong></td>
+                {activeGroups.map((g)=><td key={g.id} className={Number(totalsRow.values[g.name] || 0) > 0 ? "cell-positive" : "cell-zero"}>{valueFormatter(totalsRow.values[g.name] || 0)}</td>)}
+                {includeExtras&&<td className={Number(totalsRow.extras || 0) > 0 ? "cell-positive" : "cell-zero"}>{money(totalsRow.extras || 0)}</td>}
+                <td className={Number(totalsRow.total || 0) > 0 ? "cell-total cell-positive" : "cell-total cell-zero"}><strong>{valueFormatter(totalsRow.total || 0)}</strong></td>
+              </tr>
             </tbody>
           </table>
         </div>
@@ -983,19 +1204,18 @@ useEffect(() => {
   }
 
   function autoAvailableSlots() {
-    const monthDate = monthFromInput(autoDraft.month);
     const selectedGroupNames = autoDraft.groups.length ? autoDraft.groups : [];
     const selectedSubjects = autoDraft.subjects.length ? autoDraft.subjects : [];
     const result = [];
+    if (!autoRangeValid) return result;
     if (!selectedGroupNames.length || !selectedSubjects.length) return result;
-    const year = monthDate.getFullYear();
-    const month = monthDate.getMonth();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const start = parseDateSafe(autoDraft.startDate);
+    const end = parseDateSafe(autoDraft.endDate);
+    if (!start || !end) return result;
     selectedGroupNames.forEach((groupName) => {
       const g = groupByName(groups, groupName);
       const subgroups = g.subgroups?.length ? g.subgroups : [""];
-      for (let day = 1; day <= daysInMonth; day += 1) {
-        const date = new Date(year, month, day);
+      for (let date = new Date(start); date <= end; date = addDays(date, 1)) {
         const dateKey = formatDateKey(date);
         const weekDay = date.getDay();
         if (weekDay === 0 || weekDay === 6) continue;
@@ -1021,13 +1241,14 @@ useEffect(() => {
   function runAutoSchedule() {
     const selectedGroupNames = autoDraft.groups.length ? autoDraft.groups : [];
     const selectedSubjects = autoDraft.subjects.length ? autoDraft.subjects : [];
+    if (!autoRangeValid) return show("Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.");
     if (!selectedGroupNames.length) return show("Selecciona al menos un grupo para programación automática.");
     if (!selectedSubjects.length) return show("Selecciona al menos una materia para programación automática.");
     const missingTeacher = selectedSubjects.find((subject) => !autoDraft.teacherMap?.[subject]);
     if (missingTeacher) return show(`Asigna un docente para ${missingTeacher}.`);
 
     const slots = autoAvailableSlots();
-    if (!slots.length) return show("No hay espacios disponibles para programar en ese mes.");
+    if (!slots.length) return show("No hay espacios disponibles para programar en ese periodo.");
     const targetBySubject = Object.fromEntries(selectedSubjects.map((subject) => [subject, autoUsesManualTargets ? Number(autoDraft.targetHours?.[subject] || 0) : autoHoursPerSubject]));
     const subjectsWithTarget = selectedSubjects.filter((subject) => Number(targetBySubject[subject] || 0) > 0);
     if (!subjectsWithTarget.length) return show("Asigna al menos 1 hora objetivo a una materia o deja los objetivos en cero para repartir automáticamente.");
@@ -1213,7 +1434,7 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
     {activeSection === "configuracion" && <section className="management-card"><div className="section-title"><p className="eyebrow">Configuración dinámica</p><h2>Grupos, docentes y materias configurables</h2><p className="muted">Puedes crear, editar o desactivar elementos sin tocar el código. Desactivar no borra programación histórica.</p></div><div className="institution-settings"><label>Nombre de la institución<input value={data.settings.institutionName || ""} onChange={(e)=>updateSettings("institutionName", e.target.value)} placeholder="Ej: PreICFES Sarasty" /></label><label>Logo de la institución<input type="file" accept="image/*" onChange={(e)=>loadLogoFile(e.target.files?.[0])}/></label>{data.settings.logoDataUrl && <button type="button" className="ghost-button" onClick={()=>updateSettings("logoDataUrl", "")}>Quitar logo</button>}</div><div className="config-grid"><article><h3>Crear grupo</h3><form onSubmit={saveGroup} className="schedule-form"><input placeholder="Nombre del grupo" value={entityDraft.groupName} onChange={(e)=>setEntityDraft({...entityDraft,groupName:e.target.value})}/><select value={entityDraft.groupType} onChange={(e)=>setEntityDraft({...entityDraft,groupType:e.target.value})}><option value="fixed">Franjas fijas</option><option value="free">Horas libres</option><option value="custom">Horarios personalizados</option></select>{entityDraft.groupType==="custom"&&<textarea placeholder={"Horarios personalizados, uno por línea. Ej:\n14:30-17:30\n08:00-11:00"} value={entityDraft.groupCustomSlots} onChange={(e)=>setEntityDraft({...entityDraft,groupCustomSlots:e.target.value})}/>}<label className="inline-check"><input type="checkbox" checked={entityDraft.groupTravel} onChange={(e)=>setEntityDraft({...entityDraft,groupTravel:e.target.checked})}/> Bloqueo diario por desplazamiento</label><input placeholder="Subgrupos separados por coma. Ej: Grupo 1, Grupo 2" value={entityDraft.groupSubgroups} onChange={(e)=>setEntityDraft({...entityDraft,groupSubgroups:e.target.value})}/><button className="primary-button">Crear grupo</button></form></article><article><h3>Crear docente</h3><form onSubmit={saveTeacher} className="schedule-form"><input placeholder="Nombre del docente" value={entityDraft.teacherName} onChange={(e)=>setEntityDraft({...entityDraft,teacherName:e.target.value})}/><button className="primary-button">Crear docente</button></form></article><article><h3>Crear materia/actividad</h3><form onSubmit={saveSubject} className="schedule-form"><input placeholder="Nombre" value={entityDraft.subjectName} onChange={(e)=>setEntityDraft({...entityDraft,subjectName:e.target.value})}/><button className="primary-button">Crear materia</button></form></article></div><div className="entity-lists"><article><h3>Grupos</h3>{groups.map((g)=><div className="entity-row group-entity-row" key={g.id}><input value={g.name} onChange={(e)=>updateEntity("groups",g.id,{name:e.target.value})}/><select value={g.type} onChange={(e)=>updateEntity("groups",g.id,{type:e.target.value})}><option value="fixed">Fijo</option><option value="free">Libre</option><option value="custom">Personalizado</option></select><label><input type="checkbox" checked={g.travelBlock} onChange={(e)=>updateEntity("groups",g.id,{travelBlock:e.target.checked})}/> Viaje</label><label><input type="checkbox" checked={g.active!==false} onChange={(e)=>updateEntity("groups",g.id,{active:e.target.checked})}/> Activo</label>{g.type==="custom"&&<textarea className="custom-slots-textarea" value={g.customSlotsText ?? customSlotsToText(g.customSlots)} onChange={(e)=>updateEntity("groups",g.id,{customSlotsText:e.target.value})} onBlur={(e)=>{ const parsed=parseCustomSlots(e.target.value); if(parsed.length){ updateEntity("groups",g.id,{customSlots:parsed, customSlotsText:e.target.value}); } else { show("Horario personalizado inválido. Usa formato 14:30-17:30, uno por línea."); } }} placeholder={"Ej:\n14:30-17:30"}/>}</div>)}</article><article><h3>Docentes</h3>{teachers.map((t)=><div className="entity-row" key={t.id}><input value={t.name} onChange={(e)=>updateEntity("teachers",t.id,{name:e.target.value})}/><label><input type="checkbox" checked={t.active!==false} onChange={(e)=>updateEntity("teachers",t.id,{active:e.target.checked})}/> Activo</label></div>)}</article><article><h3>Materias</h3>{subjects.map((s)=><div className="entity-row subject-row" key={s.id}><input value={s.name} onChange={(e)=>updateEntity("subjects",s.id,{name:e.target.value})}/><label className="color-picker-label">Color<input type="color" value={s.color || defaultSubjectColor(s.name)} onChange={(e)=>updateEntity("subjects",s.id,{color:e.target.value})}/></label><span className="subject-color-preview" style={{"--item-color": s.color || defaultSubjectColor(s.name)}}>{s.name}</span><label><input type="checkbox" checked={s.active!==false} onChange={(e)=>updateEntity("subjects",s.id,{active:e.target.checked})}/> Activa</label></div>)}</article></div><article className="auto-program-card">
   <div className="section-title">
     <p className="eyebrow">Programación automática</p>
-    <h2>Asignación automática por grupo y mes</h2>
+    <h2>Asignación automática por grupo y periodo</h2>
     <p className="muted">Asigna docentes, selecciona materias y grupos, define horas objetivo por materia y prioridades de franja para intensivos. La app programará de lunes a viernes, sin festivos, respetando restricciones y clases ya existentes.</p>
   </div>
 
@@ -1226,18 +1447,20 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
     </article>
 
     <article className="auto-panel">
-      <div className="auto-panel-head"><span>2</span><div><h3>Materias a programar</h3><p>Selecciona solo las materias que entran en el mes.</p></div></div>
+      <div className="auto-panel-head"><span>2</span><div><h3>Materias a programar</h3><p>Selecciona solo las materias que entran en el periodo.</p></div></div>
       <div className="auto-check-list auto-check-grid">
         {activeSubjects.filter((s)=>!isSimulationSubject(s.name)).map((s)=><label className="inline-check" key={s.id}><input type="checkbox" checked={autoDraft.subjects.includes(s.name)} onChange={()=>toggleAutoSelection("subjects",s.name)}/> {s.name}</label>)}
       </div>
     </article>
 
     <article className="auto-panel">
-      <div className="auto-panel-head"><span>3</span><div><h3>Grupos y mes</h3><p>La programación automática se calcula por periodo.</p></div></div>
+      <div className="auto-panel-head"><span>3</span><div><h3>Grupos y periodo</h3><p>La programación automática se calcula por periodo.</p></div></div>
       <div className="auto-check-list auto-check-grid">
         {activeGroups.map((g)=><label className="inline-check" key={g.id}><input type="checkbox" checked={autoDraft.groups.includes(g.name)} onChange={()=>toggleAutoSelection("groups",g.name)}/> {g.name}</label>)}
       </div>
-      <label>Mes<input type="month" value={autoDraft.month} onChange={(e)=>setAutoDraft({...autoDraft,month:e.target.value})}/></label>
+      <div className="date-range-toolbar"><label>Fecha inicio<input type="date" value={autoDraft.startDate} onChange={(e)=>setAutoDraft({...autoDraft,startDate:e.target.value})}/></label><label>Fecha fin<input type="date" value={autoDraft.endDate} onChange={(e)=>setAutoDraft({...autoDraft,endDate:e.target.value})}/></label></div>
+      {!autoRangeValid && <p className="danger-text">Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin.</p>}
+      <p className="muted period-chip">Periodo aplicado: {rangePeriodLabel(autoDraft)}</p>
       <div className="auto-summary compact-summary">
         <p><strong>{autoTotalHours}</strong><span> horas disponibles de lunes a viernes, sin festivos</span></p>
         <p><strong>{autoHoursPerSubject}</strong><span> horas estimadas por materia si se reparte igual</span></p>
@@ -1269,11 +1492,11 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
 
     {activeSection === "disponibilidad" && <section className="management-card"><div className="section-title"><p className="eyebrow">Disponibilidad docente</p><h2>Restricciones por día y hora</h2><p className="muted">Registra los horarios en los que cada docente NO puede dictar clase. Ejemplo: miércoles 4 a 6 o lunes en la mañana.</p></div><form className="restriction-form extended" onSubmit={addRestriction}><label>Docente<select value={restrictionDraft.teacher} onChange={(e)=>setRestrictionDraft({...restrictionDraft,teacher:e.target.value})}>{activeTeachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Día<select value={restrictionDraft.day} onChange={(e)=>setRestrictionDraft({...restrictionDraft,day:e.target.value})}>{weekDayOptions.map((d)=><option key={d.value} value={d.value}>{d.label}</option>)}</select></label><label>Inicio<select value={restrictionDraft.startTime} onChange={(e)=>setRestrictionDraft({...restrictionDraft,startTime:e.target.value})}>{hourlyStartOptions.map((h)=><option key={h}>{h}</option>)}</select></label><label>Fin<select value={restrictionDraft.endTime} onChange={(e)=>setRestrictionDraft({...restrictionDraft,endTime:e.target.value})}>{hourlyEndOptions.map((h)=><option key={h}>{h}</option>)}</select></label><button className="primary-button">Agregar</button></form><div className="restriction-list">{teachers.map((t)=><article className="restriction-item" key={t.id}><div><h3>{t.name}</h3><div className="chips">{(t.restrictions||[]).length?(t.restrictions||[]).map((r)=><button key={r.id} onClick={()=>removeRestriction(t.id,r.id)}>{dayLabel(r.day)} {r.startTime}-{r.endTime} ×</button>):<span className="muted">Sin restricciones</span>}</div></div></article>)}</div></section>}
 
-    {activeSection === "pagos" && <section className="management-card"><div className="section-title"><p className="eyebrow">Pagos</p><h2>Liquidación mensual</h2><p className="muted">Selecciona el mes directamente desde esta pestaña. Las horas extras no aparecen en el calendario.</p></div><div className="section-toolbar"><label>Mes de análisis<input type="month" value={monthInputValue(paymentsDate)} onChange={(e)=>setPaymentsDate(monthFromInput(e.target.value))}/></label></div><div className="rates-grid">{teachers.map((t)=><label className="rate-card" key={t.id}>{t.name}<input type="number" value={t.hourlyRate||""} onChange={(e)=>updateTeacherRate(t.id,"hourlyRate",e.target.value)} placeholder="Valor hora"/><span>{money(t.hourlyRate)} / hora</span><input type="number" value={t.simulationRate||""} onChange={(e)=>updateTeacherRate(t.id,"simulationRate",e.target.value)} placeholder="Valor simulacro"/><span>{money(t.simulationRate)} / simulacro</span></label>)}</div><article className="extra-card"><h3>Agregar horas extras</h3><form className="restriction-form extended" onSubmit={addExtraHour}><label>Docente<select value={extraDraft.teacher} onChange={(e)=>setExtraDraft({...extraDraft,teacher:e.target.value})}>{activeTeachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Fecha<input type="date" value={extraDraft.date} onChange={(e)=>setExtraDraft({...extraDraft,date:e.target.value})}/></label><label>Cantidad de horas<input type="number" min="0" step="0.5" value={extraDraft.hours} onChange={(e)=>setExtraDraft({...extraDraft,hours:e.target.value})}/></label><label>Valor hora extra<input type="number" min="0" value={extraDraft.rate} onChange={(e)=>setExtraDraft({...extraDraft,rate:e.target.value})}/></label><label>Concepto<input value={extraDraft.concept} onChange={(e)=>setExtraDraft({...extraDraft,concept:e.target.value})} placeholder="Ej: Apoyo, reunión, nivelación"/></label><button className="primary-button">Agregar extra</button></form></article><div className="stats-grid"><article className="stat-box"><strong>{money(paymentsCounters.totalPay)}</strong><span>Total estimado del mes</span></article><article className="stat-box"><strong>{paymentsCounters.totalHours} h</strong><span>Horas ordinarias</span></article><article className="stat-box"><strong>{paymentsCounters.totalExtraHours} h</strong><span>Horas extras</span></article><article className="stat-box"><strong>{money(paymentsCounters.totalExtraPay)}</strong><span>Valor horas extras</span></article></div><div className="summary-tables matrix-summary">{renderMatrixTable("Pagos por docente y grupo", "Docente", matrixPaymentsByTeacher(paymentsDate), (v)=>money(v), true, "pagos-docente-grupo")}<article><h3>Horas extras registradas</h3><table><thead><tr><th>Fecha</th><th>Docente</th><th>Concepto</th><th>Horas</th><th>Valor</th><th></th></tr></thead><tbody>{paymentsExtraHours.length?paymentsExtraHours.map((x)=><tr key={x.id}><td>{x.date}</td><td>{x.teacher}</td><td>{x.concept||"Horas extras"}</td><td>{x.hours}</td><td>{money(Number(x.hours||0)*Number(x.rate||0))}</td><td><button className="mini-delete" onClick={()=>deleteExtraHour(x.id)}>Eliminar</button></td></tr>):<tr><td colSpan="6">Sin horas extras en el mes seleccionado.</td></tr>}</tbody></table></article></div></section>}
+    {activeSection === "pagos" && <section className="management-card"><div className="section-title"><p className="eyebrow">Pagos</p><h2>Liquidación por periodo</h2><p className="muted">Selecciona fecha inicio y fecha fin. Las horas extras no aparecen en el calendario.</p></div><div className="section-toolbar date-range-toolbar"><label>Fecha inicio<input type="date" value={paymentsRange.startDate} onChange={(e)=>updateRange(setPaymentsRange,"startDate",e.target.value)}/></label><label>Fecha fin<input type="date" value={paymentsRange.endDate} onChange={(e)=>updateRange(setPaymentsRange,"endDate",e.target.value)}/></label><p className={paymentsRangeValid ? "muted period-chip" : "danger-text"}>{paymentsRangeValid ? `Periodo aplicado: ${rangePeriodLabel(paymentsRange)}` : "Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin."}</p></div><div className="rates-grid">{teachers.map((t)=><label className="rate-card" key={t.id}>{t.name}<input type="number" value={t.hourlyRate||""} onChange={(e)=>updateTeacherRate(t.id,"hourlyRate",e.target.value)} placeholder="Valor hora"/><span>{money(t.hourlyRate)} / hora</span><input type="number" value={t.simulationRate||""} onChange={(e)=>updateTeacherRate(t.id,"simulationRate",e.target.value)} placeholder="Valor simulacro"/><span>{money(t.simulationRate)} / simulacro</span></label>)}</div><article className="extra-card"><h3>Agregar horas extras</h3><form className="restriction-form extended" onSubmit={addExtraHour}><label>Docente<select value={extraDraft.teacher} onChange={(e)=>setExtraDraft({...extraDraft,teacher:e.target.value})}>{activeTeachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Fecha<input type="date" value={extraDraft.date} onChange={(e)=>setExtraDraft({...extraDraft,date:e.target.value})}/></label><label>Cantidad de horas<input type="number" min="0" step="0.5" value={extraDraft.hours} onChange={(e)=>setExtraDraft({...extraDraft,hours:e.target.value})}/></label><label>Valor hora extra<input type="number" min="0" value={extraDraft.rate} onChange={(e)=>setExtraDraft({...extraDraft,rate:e.target.value})}/></label><label>Concepto<input value={extraDraft.concept} onChange={(e)=>setExtraDraft({...extraDraft,concept:e.target.value})} placeholder="Ej: Apoyo, reunión, nivelación"/></label><button className="primary-button">Agregar extra</button></form></article><div className="stats-grid"><article className="stat-box"><strong>{money(paymentsCounters.totalPay)}</strong><span>Total estimado del periodo</span></article><article className="stat-box"><strong>{paymentsCounters.totalHours} h</strong><span>Horas ordinarias</span></article><article className="stat-box"><strong>{paymentsCounters.totalExtraHours} h</strong><span>Horas extras</span></article><article className="stat-box"><strong>{money(paymentsCounters.totalExtraPay)}</strong><span>Valor horas extras</span></article></div><div className="summary-tables matrix-summary">{renderMatrixTable("Pagos por docente y grupo", "Docente", matrixPaymentsByTeacher(), (v)=>money(v), true, "pagos-docente-grupo")}<article><h3>Horas extras registradas</h3><table><thead><tr><th>Fecha</th><th>Docente</th><th>Concepto</th><th>Horas</th><th>Valor</th><th></th></tr></thead><tbody>{paymentsExtraHours.length?paymentsExtraHours.map((x)=><tr key={x.id}><td>{x.date}</td><td>{x.teacher}</td><td>{x.concept||"Horas extras"}</td><td>{x.hours}</td><td>{money(Number(x.hours||0)*Number(x.rate||0))}</td><td><button className="mini-delete" onClick={()=>deleteExtraHour(x.id)}>Eliminar</button></td></tr>):<tr><td colSpan="6">Sin horas extras en el periodo seleccionado.</td></tr>}</tbody></table></article></div></section>}
 
-    {activeSection === "dashboard" && <section className="management-card"><div className="section-title"><p className="eyebrow">Horas</p><h2>Distribución mensual de horas</h2><p className="muted">Controla la distribución de horas por materia y por docente en cada grupo para equilibrar la programación.</p></div><div className="section-toolbar"><label>Mes de análisis<input type="month" value={monthInputValue(dashboardDate)} onChange={(e)=>setDashboardDate(monthFromInput(e.target.value))}/></label></div><div className="stats-grid"><article className="stat-box"><strong>{dashboardSchedules.length}</strong><span>clases y actividades</span></article><article className="stat-box"><strong>{dashboardSchedules.filter((s)=>isSimulationSubject(s.subject)).length}</strong><span>simulacros</span></article><article className="stat-box"><strong>{dashboardCounters.totalHours} h</strong><span>horas ordinarias</span></article><article className="stat-box"><strong>{money(dashboardCounters.totalPay)}</strong><span>costo estimado</span></article></div><div className="summary-tables matrix-summary">{renderMatrixTable("Horas por materia y grupo", "Materia", matrixHoursBySubject(dashboardDate), (v)=>`${v || 0} h`, false, "horas-materia-grupo")}{renderMatrixTable("Horas por docente y grupo", "Docente", matrixHoursByTeacher(dashboardDate), (v)=>`${v || 0} h`, false, "horas-docente-grupo")}</div></section>}
+    {activeSection === "dashboard" && <section className="management-card"><div className="section-title"><p className="eyebrow">Horas</p><h2>Distribución de horas por periodo</h2><p className="muted">Controla la distribución de horas por materia y por docente en cada grupo para equilibrar la programación.</p></div><div className="section-toolbar date-range-toolbar"><label>Fecha inicio<input type="date" value={dashboardRange.startDate} onChange={(e)=>updateRange(setDashboardRange,"startDate",e.target.value)}/></label><label>Fecha fin<input type="date" value={dashboardRange.endDate} onChange={(e)=>updateRange(setDashboardRange,"endDate",e.target.value)}/></label><p className={dashboardRangeValid ? "muted period-chip" : "danger-text"}>{dashboardRangeValid ? `Periodo aplicado: ${rangePeriodLabel(dashboardRange)}` : "Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin."}</p></div><div className="stats-grid"><article className="stat-box"><strong>{dashboardSchedules.length}</strong><span>clases y actividades</span></article><article className="stat-box"><strong>{dashboardSchedules.filter((s)=>isSimulationSubject(s.subject)).length}</strong><span>simulacros</span></article><article className="stat-box"><strong>{dashboardCounters.totalHours} h</strong><span>horas ordinarias</span></article><article className="stat-box"><strong>{money(dashboardCounters.totalPay)}</strong><span>costo estimado</span></article></div><div className="summary-tables matrix-summary">{renderMatrixTable("Horas por materia y grupo", "Materia", matrixHoursBySubject(), (v)=>`${v || 0} h`, false, "horas-materia-grupo")}{renderMatrixTable("Horas por docente y grupo", "Docente", matrixHoursByTeacher(), (v)=>`${v || 0} h`, false, "horas-docente-grupo")}</div></section>}
 
-    {activeSection === "informes" && <section className="management-card"><div className="section-title"><p className="eyebrow">Informes</p><h2>Calendarios, horas y pagos</h2><p className="muted">Selecciona mes y filtros. Los informes no dependen del mes visible en el calendario principal.</p></div><div className="report-filters"><label>Mes<input type="month" value={monthInputValue(reportDate)} onChange={(e)=>setReportDate(monthFromInput(e.target.value))}/></label><label>Grupo<select value={reportFilters.group} onChange={(e)=>setReportFilters({...reportFilters,group:e.target.value})}><option value="">Todos</option>{groups.map((g)=><option key={g.id}>{g.name}</option>)}</select></label><label>Docente<select value={reportFilters.teacher} onChange={(e)=>setReportFilters({...reportFilters,teacher:e.target.value})}><option value="">Todos</option>{teachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Materia<select value={reportFilters.subject} onChange={(e)=>setReportFilters({...reportFilters,subject:e.target.value})}><option value="">Todas</option>{subjects.map((s)=><option key={s.id}>{s.name}</option>)}</select></label><button className="ghost-button" onClick={()=>setReportFilters({group:"",teacher:"",subject:""})}>Quitar filtros</button></div><div className="report-grid"><article className="report-card"><h3>1. Calendario visual en PDF</h3><p className="muted">Genera el calendario mensual con la programación de todos los cursos en el mismo calendario. Respeta los filtros aplicados.</p><button className="primary-button" onClick={printableCalendarReport}>Generar calendario PDF</button></article><article className="report-card"><h3>2. Informe detallado de horas</h3><p className="muted">Tabla por grupo, docente, materia y horas del periodo seleccionado.</p><div className="button-row"><button className="primary-button" onClick={printHoursReport}>PDF</button><button className="ghost-button" onClick={generateHoursCSV}>Excel/CSV</button></div></article><article className="report-card"><h3>3. Informe detallado de pagos</h3><p className="muted">Detalle por docente, materia, grupo, simulacros y horas extras cuando correspondan.</p><div className="button-row"><button className="primary-button" onClick={printPaymentsReport}>PDF</button><button className="ghost-button" onClick={generatePaymentsCSV}>Excel/CSV</button></div></article><article className="report-card"><h3>Resultado filtrado</h3><p><strong>{reportSchedules.length}</strong> clases/actividades</p><p><strong>{reportCounters.totalHours}</strong> horas ordinarias</p><p><strong>{money(reportCounters.totalPay)}</strong> total pagos</p><p className="muted">{reportFilterLabel()}</p></article><article className="report-card"><h3>Duplicar semana</h3><p className="muted">Duplica la semana visible en la vista semanal a la semana siguiente.</p><button className="primary-button" onClick={duplicateWeek}>Duplicar semana</button></article><article className="report-card"><h3>Duplicar mes</h3><p className="muted">Duplica todo el mes visible del calendario principal al mes siguiente.</p><button className="primary-button" onClick={duplicateMonth}>Duplicar mes</button></article></div></section>}
+    {activeSection === "informes" && <section className="management-card"><div className="section-title"><p className="eyebrow">Informes</p><h2>Calendarios, horas y pagos</h2><p className="muted">Selecciona periodo y filtros. El calendario visual conserva su mes propio y no depende del mes visible en el calendario principal.</p></div><div className="report-filters report-range-filters"><label>Fecha inicio<input type="date" value={reportRange.startDate} onChange={(e)=>updateRange(setReportRange,"startDate",e.target.value)}/></label><label>Fecha fin<input type="date" value={reportRange.endDate} onChange={(e)=>updateRange(setReportRange,"endDate",e.target.value)}/></label><label>Mes calendario PDF<input type="month" value={monthInputValue(reportDate)} onChange={(e)=>setReportDate(monthFromInput(e.target.value))}/></label><label>Grupo<select value={reportFilters.group} onChange={(e)=>setReportFilters({...reportFilters,group:e.target.value})}><option value="">Todos</option>{groups.map((g)=><option key={g.id}>{g.name}</option>)}</select></label><label>Docente<select value={reportFilters.teacher} onChange={(e)=>setReportFilters({...reportFilters,teacher:e.target.value})}><option value="">Todos</option>{teachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label><label>Materia<select value={reportFilters.subject} onChange={(e)=>setReportFilters({...reportFilters,subject:e.target.value})}><option value="">Todas</option>{subjects.map((s)=><option key={s.id}>{s.name}</option>)}</select></label><button className="ghost-button" onClick={()=>setReportFilters({group:"",teacher:"",subject:""})}>Quitar filtros</button></div><p className={reportRangeValid ? "muted period-chip" : "danger-text"}>{reportRangeValid ? `Periodo analizado: ${rangePeriodLabel(reportRange)}` : "Rango invalido: la fecha inicio debe ser menor o igual a la fecha fin."}</p><div className="report-grid"><article className="report-card"><h3>1. Calendario visual en PDF</h3><p className="muted">Genera el calendario mensual con la programación de todos los cursos en el mismo calendario. Respeta los filtros aplicados.</p><button className="primary-button" onClick={printableCalendarReport}>Generar calendario PDF</button></article><article className="report-card"><h3>2. Informe detallado de horas</h3><p className="muted">Tabla por grupo, docente, materia y horas del periodo seleccionado.</p><div className="button-row"><button className="primary-button" onClick={printHoursReport}>PDF</button><button className="ghost-button" onClick={generateHoursExcel}>Excel</button></div></article><article className="report-card"><h3>3. Informe detallado de pagos</h3><p className="muted">Detalle por docente, materia, grupo, simulacros y horas extras cuando correspondan.</p><div className="button-row"><button className="primary-button" onClick={printPaymentsReport}>PDF</button><button className="ghost-button" onClick={generatePaymentsExcel}>Excel</button></div></article><article className="report-card"><h3>Resultado filtrado</h3><p><strong>{reportSchedules.length}</strong> clases/actividades</p><p><strong>{reportCounters.totalHours}</strong> horas ordinarias</p><p><strong>{money(reportCounters.totalPay)}</strong> total pagos</p><p className="muted">{reportFilterLabel()}</p></article><article className="report-card"><h3>Duplicar semana</h3><p className="muted">Duplica la semana visible en la vista semanal a la semana siguiente.</p><button className="primary-button" onClick={duplicateWeek}>Duplicar semana</button></article><article className="report-card"><h3>Duplicar mes</h3><p className="muted">Duplica todo el mes visible del calendario principal al mes siguiente.</p><button className="primary-button" onClick={duplicateMonth}>Duplicar mes</button></article></div></section>}
 
     {activeSection === "respaldo" && <section className="management-card"><div className="section-title"><p className="eyebrow">Respaldo local</p><h2>Exportar e importar copia de seguridad</h2><p className="muted">Antes de instalar nuevas versiones, exporta un respaldo JSON. Luego puedes restaurarlo en este u otro computador.</p></div><div className="report-grid"><article className="report-card"><h3>Exportar respaldo</h3><p>Incluye clases, grupos, docentes, materias, restricciones, pagos, horas extras y configuración.</p><button className="primary-button" onClick={exportBackup}>Descargar respaldo JSON</button></article><article className="report-card"><h3>Importar respaldo</h3><input type="file" accept="application/json,.json" onChange={(e)=>importBackup(e.target.files?.[0])}/><p className="muted">Esto reemplaza los datos actuales por los del respaldo importado.</p></article><article className="report-card"><h3>Diagnóstico</h3><p>Clases válidas: <strong>{validSchedules.length}</strong></p><p>Registros inválidos detectados: <strong>{invalidSchedules.length}</strong></p><p>Grupos: <strong>{groups.length}</strong></p><p>Docentes: <strong>{teachers.length}</strong></p><p>Materias: <strong>{subjects.length}</strong></p><p>Horas extras: <strong>{(data.extraHours||[]).length}</strong></p></article></div></section>}
     <footer className="app-footer">Desarrollado por <strong>SOFTWARE INTELLIGENCE QUALITY</strong> - Ing. Juan Camilo Pérez</footer>

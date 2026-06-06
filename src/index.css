@@ -514,6 +514,13 @@ td:last-child { text-align: right; color: #bfdbfe; font-weight: 900; white-space
   margin-bottom: 18px;
 }
 .section-toolbar { grid-template-columns: minmax(220px, 320px); }
+.section-toolbar.date-range-toolbar,
+.date-range-toolbar {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(150px, 220px)) minmax(220px, 1fr);
+  gap: 12px;
+  align-items: end;
+}
 .section-toolbar label, .report-filters label {
   display: grid;
   gap: 6px;
@@ -530,6 +537,28 @@ td:last-child { text-align: right; color: #bfdbfe; font-weight: 900; white-space
   background: rgba(2, 6, 23, 0.72);
   outline: none;
 }
+.date-range-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: .92rem;
+  font-weight: 800;
+}
+.date-range-toolbar input,
+.auto-panel .date-range-toolbar input {
+  width: 100%;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 14px;
+  padding: 11px 12px;
+  color: #e5e7eb;
+  background: rgba(2, 6, 23, 0.72);
+  outline: none;
+}
+.period-chip {
+  align-self: center;
+  margin: 0;
+  font-weight: 800;
+}
 .button-row {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -537,7 +566,7 @@ td:last-child { text-align: right; color: #bfdbfe; font-weight: 900; white-space
 }
 .button-row .primary-button, .button-row .ghost-button { margin-top: 0; }
 @media (max-width: 980px) {
-  .section-toolbar, .report-filters, .button-row { grid-template-columns: 1fr; }
+  .section-toolbar, .report-filters, .button-row, .section-toolbar.date-range-toolbar, .date-range-toolbar { grid-template-columns: 1fr; }
 }
 
 /* Ajuste v18: matrices operativas legibles y con filtros por columna. */
@@ -622,6 +651,20 @@ td:last-child { text-align: right; color: #bfdbfe; font-weight: 900; white-space
 .matrix-table .cell-total {
   color: #dbeafe;
   background: rgba(96, 165, 250, 0.11);
+}
+.matrix-table .matrix-total-row td {
+  color: #f8fafc;
+  font-weight: 900;
+  background: rgba(30, 41, 59, 0.92);
+  border-top: 1px solid rgba(147, 197, 253, 0.28);
+}
+.matrix-table .matrix-total-row .sticky-col {
+  background: rgba(15, 23, 42, 1);
+}
+.matrix-table .matrix-total-row .cell-positive,
+.matrix-table .matrix-total-row .cell-total {
+  color: #f8fafc;
+  background: rgba(37, 99, 235, 0.18);
 }
 .column-filter {
   display: block;

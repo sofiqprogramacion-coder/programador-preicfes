@@ -33,6 +33,11 @@ export function formatDateKey(date) {
   return `${year}-${month}-${day}`;
 }
 
+export function isDateInRange(dateKey, startDate, endDate) {
+  if (!dateKey || !startDate || !endDate) return false;
+  return String(dateKey) >= String(startDate) && String(dateKey) <= String(endDate);
+}
+
 export function formatLongDate(date) {
   return date.toLocaleDateString("es-CO", {
     weekday: "long",
