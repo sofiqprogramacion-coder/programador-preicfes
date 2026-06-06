@@ -163,6 +163,12 @@ function splitValidInvalidSchedules(schedules = [], groups = [], teachers = [], 
   });
   return { valid, invalid };
 }
+function ensureCatalogIds(list = [], prefix) {
+  return (Array.isArray(list) ? list : []).map((item, index) => ({
+    ...item,
+    id: item.id || `${prefix}-${normalizeText(item.name).toLowerCase().replace(/[^a-z0-9]+/g, "-") || index}-${index}`,
+  }));
+}
 function sanitizeAppData(rawData) {
   const catalogued = ensureCatalogFromRecords(rawData);
   const { valid, invalid } = splitValidInvalidSchedules(catalogued.schedules || [], catalogued.groups || [], catalogued.teachers || [], catalogued.subjects || []);
@@ -293,7 +299,14 @@ function ensureCatalogFromRecords(rawData) {
     return g;
   });
 
-  return { ...rawData, groups: normalizedGroups, subjects: normalizeSubjects(subjects), teachers, schedules, extraHours };
+  return {
+    ...rawData,
+    groups: ensureCatalogIds(normalizedGroups, "grupo"),
+    subjects: ensureCatalogIds(normalizeSubjects(subjects), "materia"),
+    teachers: ensureCatalogIds(teachers, "docente"),
+    schedules,
+    extraHours,
+  };
 }
 
 function loadInitialData() {
@@ -670,6 +683,52 @@ useEffect(() => {
   function saveTeacher(event) { event.preventDefault(); const name = entityDraft.teacherName.trim(); if (!name) return show("Escribe el nombre del docente."); if (teachers.some((t) => t.name.toLowerCase() === name.toLowerCase())) return show("Ya existe un docente con ese nombre."); patchData({ teachers: [...teachers, { id: uid("docente"), name, active: true, hourlyRate: 0, simulationRate: 100000, color: colors[teachers.length % colors.length], restrictions: [] }] }); setEntityDraft((d) => ({ ...d, teacherName: "" })); show("Docente creado correctamente."); }
   function saveSubject(event) { event.preventDefault(); const name = entityDraft.subjectName.trim(); if (!name) return show("Escribe el nombre de la materia o actividad."); if (subjects.some((s) => s.name.toLowerCase() === name.toLowerCase())) return show("Ya existe esa materia o actividad."); patchData({ subjects: [...subjects, { id: uid("materia"), name, active: true, color: defaultSubjectColor(name, subjects.length) }] }); setEntityDraft((d) => ({ ...d, subjectName: "" })); show("Materia/actividad creada correctamente."); }
   function updateEntity(kind, id, patch) { patchData({ [kind]: data[kind].map((x) => x.id === id ? { ...x, ...patch } : x) }); }
+  function hasHistoricalAssociation(kind, entity) {
+    const name = normalizeText(entity?.name).toLowerCase();
+    if (!name) return false;
+    const matches = (value) => normalizeText(value).toLowerCase() === name;
+    if (kind === "groups") return (data.schedules || []).some((item) => matches(item.group));
+    if (kind === "teachers") return (data.schedules || []).some((item) => matches(item.teacher)) || (data.extraHours || []).some((item) => matches(item.teacher));
+    if (kind === "subjects") return (data.schedules || []).some((item) => matches(item.subject));
+    return false;
+  }
+  function confirmDeleteEntity() {
+    return window.confirm("¿Seguro que deseas eliminar este registro? Esta acción no se puede deshacer.");
+  }
+  function deleteGroup(groupId) {
+    const groupToDelete = groups.find((group) => group.id === groupId);
+    if (!groupToDelete || !confirmDeleteEntity()) return;
+    if (hasHistoricalAssociation("groups", groupToDelete)) return show("No se puede eliminar este registro porque tiene información histórica asociada. Puedes inactivarlo para que no aparezca en nuevas programaciones.");
+    const nextGroups = groups.filter((group) => group.id !== groupId);
+    patchData({ groups: nextGroups });
+    if (selectedGroup === groupToDelete.name) setSelectedGroup(nextGroups.find((group) => group.active !== false)?.name || nextGroups[0]?.name || "");
+    setAutoDraft((old) => ({ ...old, groups: (old.groups || []).filter((name) => normalizeText(name).toLowerCase() !== normalizeText(groupToDelete.name).toLowerCase()) }));
+    show("Grupo eliminado correctamente.");
+  }
+  function deleteTeacher(teacherId) {
+    const teacherToDelete = teachers.find((teacher) => teacher.id === teacherId);
+    if (!teacherToDelete || !confirmDeleteEntity()) return;
+    if (hasHistoricalAssociation("teachers", teacherToDelete)) return show("No se puede eliminar este registro porque tiene información histórica asociada. Puedes inactivarlo para que no aparezca en nuevas programaciones.");
+    patchData({ teachers: teachers.filter((teacher) => teacher.id !== teacherId) });
+    setFilters((old) => ({ ...old, teacher: old.teacher === teacherToDelete.name ? "" : old.teacher }));
+    setReportFilters((old) => ({ ...old, teacher: old.teacher === teacherToDelete.name ? "" : old.teacher }));
+    setForm((old) => ({ ...old, teacher: old.teacher === teacherToDelete.name ? (activeTeachers.find((teacher) => teacher.id !== teacherId)?.name || "") : old.teacher }));
+    setRestrictionDraft((old) => ({ ...old, teacher: old.teacher === teacherToDelete.name ? (activeTeachers.find((teacher) => teacher.id !== teacherId)?.name || "") : old.teacher }));
+    setExtraDraft((old) => ({ ...old, teacher: old.teacher === teacherToDelete.name ? (activeTeachers.find((teacher) => teacher.id !== teacherId)?.name || "") : old.teacher }));
+    setAutoDraft((old) => ({ ...old, teacherMap: Object.fromEntries(Object.entries(old.teacherMap || {}).filter(([, teacherName]) => normalizeText(teacherName).toLowerCase() !== normalizeText(teacherToDelete.name).toLowerCase())) }));
+    show("Docente eliminado correctamente.");
+  }
+  function deleteSubject(subjectId) {
+    const subjectToDelete = subjects.find((subject) => subject.id === subjectId);
+    if (!subjectToDelete || !confirmDeleteEntity()) return;
+    if (hasHistoricalAssociation("subjects", subjectToDelete)) return show("No se puede eliminar este registro porque tiene información histórica asociada. Puedes inactivarlo para que no aparezca en nuevas programaciones.");
+    patchData({ subjects: subjects.filter((subject) => subject.id !== subjectId) });
+    setFilters((old) => ({ ...old, subject: old.subject === subjectToDelete.name ? "" : old.subject }));
+    setReportFilters((old) => ({ ...old, subject: old.subject === subjectToDelete.name ? "" : old.subject }));
+    setForm((old) => ({ ...old, subject: old.subject === subjectToDelete.name ? (activeSubjects.find((subject) => subject.id !== subjectId)?.name || "") : old.subject }));
+    setAutoDraft((old) => ({ ...old, subjects: (old.subjects || []).filter((name) => normalizeText(name).toLowerCase() !== normalizeText(subjectToDelete.name).toLowerCase()) }));
+    show("Materia eliminada correctamente.");
+  }
   function updateTeacherRate(id, field, value) { updateEntity("teachers", id, { [field]: Math.max(0, Number(value || 0)) }); }
   function addRestriction(event) { event.preventDefault(); if (restrictionDraft.endTime <= restrictionDraft.startTime) return show("La hora de fin debe ser posterior a la hora de inicio."); patchData({ teachers: teachers.map((t) => t.name === restrictionDraft.teacher ? { ...t, restrictions: [...(t.restrictions || []), { id: uid("restriccion"), day: Number(restrictionDraft.day), startTime: restrictionDraft.startTime, endTime: restrictionDraft.endTime }] } : t) }); show("Restricción guardada."); }
   function removeRestriction(teacherId, restrictionId) { patchData({ teachers: teachers.map((t) => t.id === teacherId ? { ...t, restrictions: (t.restrictions || []).filter((r) => r.id !== restrictionId) } : t) }); }
@@ -807,64 +866,132 @@ useEffect(() => {
   }
 
   function styleExcelWorksheet(worksheet, headerRowNumber, moneyColumns = [], hourColumns = [], totalRowNumbers = []) {
-    worksheet.views = [{ state: "frozen", ySplit: headerRowNumber }];
+    const tableColumnCount = worksheet.getRow(headerRowNumber).cellCount || worksheet.columnCount;
+    worksheet.views = [{ state: "frozen", ySplit: headerRowNumber, showGridLines: false }];
+    worksheet.pageSetup = {
+      orientation: "landscape",
+      fitToPage: true,
+      fitToWidth: 1,
+      fitToHeight: 0,
+      horizontalCentered: true,
+      paperSize: 9,
+      printTitlesRow: `${headerRowNumber}:${headerRowNumber}`,
+      margins: {
+        left: 0.25,
+        right: 0.25,
+        top: 0.35,
+        bottom: 0.35,
+        header: 0.2,
+        footer: 0.2,
+      },
+    };
     const headerRow = worksheet.getRow(headerRowNumber);
-    headerRow.eachCell((cell) => {
+    headerRow.height = 24;
+    for (let colNumber = 1; colNumber <= tableColumnCount; colNumber += 1) {
+      const cell = headerRow.getCell(colNumber);
       cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F4F8F" } };
-      cell.alignment = { vertical: "middle", horizontal: "center" };
-      cell.border = excelBorder();
-    });
+      cell.fill = excelFill("FF163B73");
+      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+      cell.border = excelBorder("FF94A3B8");
+    }
     worksheet.eachRow((row, rowNumber) => {
-      row.eachCell((cell, colNumber) => {
+      if (rowNumber < headerRowNumber) return;
+      row.height = rowNumber === headerRowNumber ? 24 : 20;
+      for (let colNumber = 1; colNumber <= tableColumnCount; colNumber += 1) {
+        const cell = row.getCell(colNumber);
         cell.border = excelBorder();
-        cell.alignment = { vertical: "middle", horizontal: colNumber === 1 ? "center" : "left" };
+        cell.alignment = excelColumnAlignment(headerRow.getCell(colNumber).value, colNumber);
+        if (rowNumber > headerRowNumber && rowNumber % 2 === 0 && !totalRowNumbers.includes(rowNumber)) {
+          cell.fill = excelFill("FFF8FAFC");
+        }
         if (moneyColumns.includes(colNumber)) {
           cell.numFmt = '"COP" #,##0';
           cell.alignment = { vertical: "middle", horizontal: "right" };
         }
         if (hourColumns.includes(colNumber)) {
-          cell.numFmt = '0.## "h"';
-          cell.alignment = { vertical: "middle", horizontal: "right" };
+          cell.numFmt = '0.0 "h"';
+          cell.alignment = { vertical: "middle", horizontal: "center" };
         }
-      });
-      if (rowNumber <= 6) {
-        row.font = { bold: rowNumber <= 2 };
-        row.eachCell((cell) => { cell.border = {}; });
       }
       if (totalRowNumbers.includes(rowNumber)) {
         row.font = { bold: true };
-        row.eachCell((cell) => {
-          cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE0ECFF" } };
-        });
+        for (let colNumber = 1; colNumber <= tableColumnCount; colNumber += 1) {
+          const cell = row.getCell(colNumber);
+          cell.fill = excelFill("FFD9EAFD");
+          cell.border = excelBorder("FF64748B", "medium");
+        }
       }
     });
     worksheet.autoFilter = {
       from: { row: headerRowNumber, column: 1 },
-      to: { row: Math.max(headerRowNumber, worksheet.rowCount), column: worksheet.columnCount },
+      to: { row: Math.max(headerRowNumber, worksheet.rowCount), column: tableColumnCount },
     };
+    worksheet.pageSetup.printArea = `A1:${worksheet.getColumn(tableColumnCount).letter}${worksheet.rowCount}`;
     autoFitWorksheet(worksheet);
   }
 
-  function excelBorder() {
+  function excelFill(argb) {
+    return { type: "pattern", pattern: "solid", fgColor: { argb } };
+  }
+
+  function excelBorder(color = "FFCBD5E1", topStyle = "thin") {
     return {
-      top: { style: "thin", color: { argb: "FFCBD5E1" } },
-      left: { style: "thin", color: { argb: "FFCBD5E1" } },
-      bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-      right: { style: "thin", color: { argb: "FFCBD5E1" } },
+      top: { style: topStyle, color: { argb: color } },
+      left: { style: "thin", color: { argb: color } },
+      bottom: { style: "thin", color: { argb: color } },
+      right: { style: "thin", color: { argb: color } },
     };
   }
 
+  function excelColumnAlignment(headerValue, colNumber) {
+    const header = normalizeText(headerValue).toLowerCase();
+    if (header.includes("fecha") || header.includes("horario") || header.includes("tipo") || header.includes("horas") || header.includes("simulacros")) {
+      return { vertical: "middle", horizontal: "center", wrapText: true };
+    }
+    if (header.includes("valor") || header.includes("pago") || header.includes("total")) {
+      return { vertical: "middle", horizontal: "right", wrapText: true };
+    }
+    if (colNumber === 1 && !header.includes("docente") && !header.includes("materia")) {
+      return { vertical: "middle", horizontal: "center", wrapText: true };
+    }
+    return { vertical: "middle", horizontal: "left", wrapText: true };
+  }
+
   function autoFitWorksheet(worksheet) {
-    worksheet.columns.forEach((column) => {
-      let maxLength = 10;
+    const headerRow = worksheet.getRow(8);
+    worksheet.columns.forEach((column, index) => {
+      const header = String(headerRow.getCell(index + 1).value || "");
+      const widthRule = excelWidthRule(header);
+      let maxLength = widthRule.min;
       column.eachCell({ includeEmpty: true }, (cell) => {
         const value = cell.value;
-        const text = value === null || value === undefined ? "" : String(value);
-        maxLength = Math.max(maxLength, Math.min(text.length + 2, 42));
+        const text = excelCellText(value);
+        maxLength = Math.max(maxLength, Math.min(text.length + 2, widthRule.max));
       });
-      column.width = maxLength;
+      column.width = Math.min(Math.max(maxLength, widthRule.min), widthRule.max);
     });
+  }
+
+  function excelCellText(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "object" && value.richText) return value.richText.map((part) => part.text).join("");
+    if (typeof value === "object" && value.text) return value.text;
+    if (typeof value === "object" && value.formula) return value.result ?? value.formula;
+    return String(value);
+  }
+
+  function excelWidthRule(headerValue) {
+    const header = normalizeText(headerValue).toLowerCase();
+    if (header.includes("fecha")) return { min: 14, max: 16 };
+    if (header.includes("grupo")) return { min: 18, max: 22 };
+    if (header.includes("subgrupo")) return { min: 18, max: 22 };
+    if (header.includes("horario")) return { min: 22, max: 26 };
+    if (header.includes("materia") || header.includes("concepto")) return { min: 24, max: 34 };
+    if (header.includes("docente")) return { min: 24, max: 34 };
+    if (header.includes("tipo")) return { min: 14, max: 18 };
+    if (header.includes("horas") || header.includes("simulacros")) return { min: 12, max: 16 };
+    if (header.includes("valor") || header.includes("pago") || header.includes("total")) return { min: 18, max: 22 };
+    return { min: 12, max: 28 };
   }
 
   async function downloadWorkbook(workbook, filename) {
@@ -876,8 +1003,21 @@ useEffect(() => {
     reportMetaRows(title).forEach((row) => worksheet.addRow(row));
     for (let rowNumber = 1; rowNumber <= 6; rowNumber += 1) {
       worksheet.mergeCells(rowNumber, 1, rowNumber, columnCount);
+      const row = worksheet.getRow(rowNumber);
+      row.height = rowNumber === 1 ? 28 : 21;
+      const cell = row.getCell(1);
+      cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
+      cell.border = {};
+      if (rowNumber === 1) {
+        cell.font = { bold: true, size: 16, color: { argb: "FF163B73" } };
+      } else if (rowNumber === 2) {
+        cell.font = { bold: true, size: 13, color: { argb: "FF0F172A" } };
+      } else {
+        cell.font = { bold: rowNumber === 6, size: 10, color: { argb: rowNumber === 6 ? "FF475569" : "FF334155" } };
+      }
     }
-    worksheet.addRow([]);
+    const separator = worksheet.addRow([]);
+    separator.height = 10;
   }
 
   function paymentDetailRows(list = reportSchedules, extras = reportExtraHours) {
@@ -1431,7 +1571,28 @@ setLoginError("Credenciales aceptadas, pero Supabase no devolvió sesión. Verif
 
     {selectedDay && activeSection === "calendario" && <div className="modal-backdrop"><section className="day-panel"><div className="panel-header split"><div><p className="eyebrow">{selectedGroup}</p><h2>{formatLongDate(selectedDay)}</h2>{colombiaHolidays2026[selectedDateKey] && <p className="holiday-alert">Festivo: {colombiaHolidays2026[selectedDateKey]}. Puedes programar si lo necesitas.</p>}</div><button className="close-button" onClick={()=>setSelectedDay(null)}>×</button></div>{message && <div className="app-message">{message}</div>}<form className="schedule-form" onSubmit={submitSchedule}>{group.subgroups?.length>0&&<label>Salón / grupo interno<select value={form.subgroup || group.subgroups[0]} onChange={(e)=>setForm({...form,subgroup:e.target.value})}>{group.subgroups.map((s)=><option key={s}>{s}</option>)}</select></label>}<label>Materia o actividad<select value={form.subject} onChange={(e)=>setForm({...form,subject:e.target.value})}>{activeSubjects.map((s)=><option key={s.id}>{s.name}</option>)}</select></label><label>Docente<select value={form.teacher} onChange={(e)=>setForm({...form,teacher:e.target.value})}>{activeTeachers.map((t)=><option key={t.id}>{t.name}</option>)}</select></label>{isSimulationSubject(form.subject)?<div className="full-day-notice"><strong>Simulacro de día completo</strong><span>Este registro no modifica el horario normal del grupo. Solo ocupa este día, bloquea al docente y se liquida con valor de simulacro.</span></div>:(group.type==="free"?<div className="time-range-grid"><label>Hora inicio<select value={form.startTime} onChange={(e)=>setForm({...form,startTime:e.target.value})}>{hourlyStartOptions.map((h)=><option key={h}>{h}</option>)}</select></label><label>Hora fin<select value={form.endTime} onChange={(e)=>setForm({...form,endTime:e.target.value})}>{hourlyEndOptions.map((h)=><option key={h}>{h}</option>)}</select></label></div>:<label>Horario<select value={form.timeSlot} onChange={(e)=>{const [startTime,endTime]=e.target.value.split("-");setForm({...form,timeSlot:e.target.value,startTime,endTime});}}>{slotsForGroup(group).map((s)=><option key={`${s.startTime}-${s.endTime}`} value={`${s.startTime}-${s.endTime}`}>{s.label}</option>)}</select></label>)}<label>Notas<textarea value={form.notes} onChange={(e)=>setForm({...form,notes:e.target.value})} placeholder="Observaciones opcionales" /></label><button className="primary-button">Guardar clase</button></form><div className="schedule-list"><h3>Clases del día</h3>{selectedSchedules.map((s)=><article className="schedule-item" key={s.id}><div><strong>{s.subject}</strong><p>{s.teacher} · {isSimulationSubject(s.subject) ? "Día completo" : `${s.startTime}-${s.endTime} · ${s.hours} h`}</p><small>{s.classroom || "Sin subgrupo"} {s.notes?`· ${s.notes}`:""}</small></div><button onClick={()=>deleteSchedule(s.id)}>Eliminar</button></article>)}{selectedSchedules.length===0&&<p className="muted">Sin clases programadas.</p>}</div></section></div>}
 
-    {activeSection === "configuracion" && <section className="management-card"><div className="section-title"><p className="eyebrow">Configuración dinámica</p><h2>Grupos, docentes y materias configurables</h2><p className="muted">Puedes crear, editar o desactivar elementos sin tocar el código. Desactivar no borra programación histórica.</p></div><div className="institution-settings"><label>Nombre de la institución<input value={data.settings.institutionName || ""} onChange={(e)=>updateSettings("institutionName", e.target.value)} placeholder="Ej: PreICFES Sarasty" /></label><label>Logo de la institución<input type="file" accept="image/*" onChange={(e)=>loadLogoFile(e.target.files?.[0])}/></label>{data.settings.logoDataUrl && <button type="button" className="ghost-button" onClick={()=>updateSettings("logoDataUrl", "")}>Quitar logo</button>}</div><div className="config-grid"><article><h3>Crear grupo</h3><form onSubmit={saveGroup} className="schedule-form"><input placeholder="Nombre del grupo" value={entityDraft.groupName} onChange={(e)=>setEntityDraft({...entityDraft,groupName:e.target.value})}/><select value={entityDraft.groupType} onChange={(e)=>setEntityDraft({...entityDraft,groupType:e.target.value})}><option value="fixed">Franjas fijas</option><option value="free">Horas libres</option><option value="custom">Horarios personalizados</option></select>{entityDraft.groupType==="custom"&&<textarea placeholder={"Horarios personalizados, uno por línea. Ej:\n14:30-17:30\n08:00-11:00"} value={entityDraft.groupCustomSlots} onChange={(e)=>setEntityDraft({...entityDraft,groupCustomSlots:e.target.value})}/>}<label className="inline-check"><input type="checkbox" checked={entityDraft.groupTravel} onChange={(e)=>setEntityDraft({...entityDraft,groupTravel:e.target.checked})}/> Bloqueo diario por desplazamiento</label><input placeholder="Subgrupos separados por coma. Ej: Grupo 1, Grupo 2" value={entityDraft.groupSubgroups} onChange={(e)=>setEntityDraft({...entityDraft,groupSubgroups:e.target.value})}/><button className="primary-button">Crear grupo</button></form></article><article><h3>Crear docente</h3><form onSubmit={saveTeacher} className="schedule-form"><input placeholder="Nombre del docente" value={entityDraft.teacherName} onChange={(e)=>setEntityDraft({...entityDraft,teacherName:e.target.value})}/><button className="primary-button">Crear docente</button></form></article><article><h3>Crear materia/actividad</h3><form onSubmit={saveSubject} className="schedule-form"><input placeholder="Nombre" value={entityDraft.subjectName} onChange={(e)=>setEntityDraft({...entityDraft,subjectName:e.target.value})}/><button className="primary-button">Crear materia</button></form></article></div><div className="entity-lists"><article><h3>Grupos</h3>{groups.map((g)=><div className="entity-row group-entity-row" key={g.id}><input value={g.name} onChange={(e)=>updateEntity("groups",g.id,{name:e.target.value})}/><select value={g.type} onChange={(e)=>updateEntity("groups",g.id,{type:e.target.value})}><option value="fixed">Fijo</option><option value="free">Libre</option><option value="custom">Personalizado</option></select><label><input type="checkbox" checked={g.travelBlock} onChange={(e)=>updateEntity("groups",g.id,{travelBlock:e.target.checked})}/> Viaje</label><label><input type="checkbox" checked={g.active!==false} onChange={(e)=>updateEntity("groups",g.id,{active:e.target.checked})}/> Activo</label>{g.type==="custom"&&<textarea className="custom-slots-textarea" value={g.customSlotsText ?? customSlotsToText(g.customSlots)} onChange={(e)=>updateEntity("groups",g.id,{customSlotsText:e.target.value})} onBlur={(e)=>{ const parsed=parseCustomSlots(e.target.value); if(parsed.length){ updateEntity("groups",g.id,{customSlots:parsed, customSlotsText:e.target.value}); } else { show("Horario personalizado inválido. Usa formato 14:30-17:30, uno por línea."); } }} placeholder={"Ej:\n14:30-17:30"}/>}</div>)}</article><article><h3>Docentes</h3>{teachers.map((t)=><div className="entity-row" key={t.id}><input value={t.name} onChange={(e)=>updateEntity("teachers",t.id,{name:e.target.value})}/><label><input type="checkbox" checked={t.active!==false} onChange={(e)=>updateEntity("teachers",t.id,{active:e.target.checked})}/> Activo</label></div>)}</article><article><h3>Materias</h3>{subjects.map((s)=><div className="entity-row subject-row" key={s.id}><input value={s.name} onChange={(e)=>updateEntity("subjects",s.id,{name:e.target.value})}/><label className="color-picker-label">Color<input type="color" value={s.color || defaultSubjectColor(s.name)} onChange={(e)=>updateEntity("subjects",s.id,{color:e.target.value})}/></label><span className="subject-color-preview" style={{"--item-color": s.color || defaultSubjectColor(s.name)}}>{s.name}</span><label><input type="checkbox" checked={s.active!==false} onChange={(e)=>updateEntity("subjects",s.id,{active:e.target.checked})}/> Activa</label></div>)}</article></div><article className="auto-program-card">
+    {activeSection === "configuracion" && <section className="management-card">
+      <div className="section-title">
+        <p className="eyebrow">Configuración dinámica</p>
+        <h2>Grupos, docentes y materias configurables</h2>
+        <p className="muted">Puedes crear, editar, desactivar o eliminar elementos sin tocar el código. Desactivar no borra programación histórica.</p>
+      </div>
+      <div className="institution-settings">
+        <label>Nombre de la institución<input value={data.settings.institutionName || ""} onChange={(e)=>updateSettings("institutionName", e.target.value)} placeholder="Ej: PreICFES Sarasty" /></label>
+        <label>Logo de la institución<input type="file" accept="image/*" onChange={(e)=>loadLogoFile(e.target.files?.[0])}/></label>
+        {data.settings.logoDataUrl && <button type="button" className="ghost-button" onClick={()=>updateSettings("logoDataUrl", "")}>Quitar logo</button>}
+      </div>
+      <div className="config-grid">
+        <article><h3>Crear grupo</h3><form onSubmit={saveGroup} className="schedule-form"><input placeholder="Nombre del grupo" value={entityDraft.groupName} onChange={(e)=>setEntityDraft({...entityDraft,groupName:e.target.value})}/><select value={entityDraft.groupType} onChange={(e)=>setEntityDraft({...entityDraft,groupType:e.target.value})}><option value="fixed">Franjas fijas</option><option value="free">Horas libres</option><option value="custom">Horarios personalizados</option></select>{entityDraft.groupType==="custom"&&<textarea placeholder={"Horarios personalizados, uno por línea. Ej:\n14:30-17:30\n08:00-11:00"} value={entityDraft.groupCustomSlots} onChange={(e)=>setEntityDraft({...entityDraft,groupCustomSlots:e.target.value})}/>}<label className="inline-check"><input type="checkbox" checked={entityDraft.groupTravel} onChange={(e)=>setEntityDraft({...entityDraft,groupTravel:e.target.checked})}/> Bloqueo diario por desplazamiento</label><input placeholder="Subgrupos separados por coma. Ej: Grupo 1, Grupo 2" value={entityDraft.groupSubgroups} onChange={(e)=>setEntityDraft({...entityDraft,groupSubgroups:e.target.value})}/><button className="primary-button">Crear grupo</button></form></article>
+        <article><h3>Crear docente</h3><form onSubmit={saveTeacher} className="schedule-form"><input placeholder="Nombre del docente" value={entityDraft.teacherName} onChange={(e)=>setEntityDraft({...entityDraft,teacherName:e.target.value})}/><button className="primary-button">Crear docente</button></form></article>
+        <article><h3>Crear materia/actividad</h3><form onSubmit={saveSubject} className="schedule-form"><input placeholder="Nombre" value={entityDraft.subjectName} onChange={(e)=>setEntityDraft({...entityDraft,subjectName:e.target.value})}/><button className="primary-button">Crear materia</button></form></article>
+      </div>
+      <div className="entity-lists">
+        <article><h3>Grupos</h3>{groups.map((g)=><div className="entity-row group-entity-row" key={g.id}><input value={g.name} onChange={(e)=>updateEntity("groups",g.id,{name:e.target.value})}/><select value={g.type} onChange={(e)=>updateEntity("groups",g.id,{type:e.target.value})}><option value="fixed">Fijo</option><option value="free">Libre</option><option value="custom">Personalizado</option></select><label><input type="checkbox" checked={g.travelBlock} onChange={(e)=>updateEntity("groups",g.id,{travelBlock:e.target.checked})}/> Viaje</label><label><input type="checkbox" checked={g.active!==false} onChange={(e)=>updateEntity("groups",g.id,{active:e.target.checked})}/> Activo</label><button type="button" className="mini-delete" onClick={()=>deleteGroup(g.id)}>Eliminar</button>{g.type==="custom"&&<textarea className="custom-slots-textarea" value={g.customSlotsText ?? customSlotsToText(g.customSlots)} onChange={(e)=>updateEntity("groups",g.id,{customSlotsText:e.target.value})} onBlur={(e)=>{ const parsed=parseCustomSlots(e.target.value); if(parsed.length){ updateEntity("groups",g.id,{customSlots:parsed, customSlotsText:e.target.value}); } else { show("Horario personalizado inválido. Usa formato 14:30-17:30, uno por línea."); } }} placeholder={"Ej:\n14:30-17:30"}/>}</div>)}</article>
+        <article><h3>Docentes</h3>{teachers.map((t)=><div className="entity-row" key={t.id}><input value={t.name} onChange={(e)=>updateEntity("teachers",t.id,{name:e.target.value})}/><label><input type="checkbox" checked={t.active!==false} onChange={(e)=>updateEntity("teachers",t.id,{active:e.target.checked})}/> Activo</label><button type="button" className="mini-delete" onClick={()=>deleteTeacher(t.id)}>Eliminar</button></div>)}</article>
+        <article><h3>Materias</h3>{subjects.map((s)=><div className="entity-row subject-row" key={s.id}><input value={s.name} onChange={(e)=>updateEntity("subjects",s.id,{name:e.target.value})}/><label className="color-picker-label">Color<input type="color" value={s.color || defaultSubjectColor(s.name)} onChange={(e)=>updateEntity("subjects",s.id,{color:e.target.value})}/></label><span className="subject-color-preview" style={{"--item-color": s.color || defaultSubjectColor(s.name)}}>{s.name}</span><label><input type="checkbox" checked={s.active!==false} onChange={(e)=>updateEntity("subjects",s.id,{active:e.target.checked})}/> Activa</label><button type="button" className="mini-delete" onClick={()=>deleteSubject(s.id)}>Eliminar</button></div>)}</article>
+      </div>
+      <article className="auto-program-card">
   <div className="section-title">
     <p className="eyebrow">Programación automática</p>
     <h2>Asignación automática por grupo y periodo</h2>
